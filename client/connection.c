@@ -7,7 +7,7 @@
 
 int player_id = -1;
 
-void handle_packet(int sockfd, Packet *packet) {
+void handle_packet(int sockfd __attribute__((unused)), Packet *packet) {
     void *serialized = serialize_packet(packet);
     
     if(packet->id == SERVER_HANDSHAKE) {
