@@ -1,5 +1,6 @@
 #include "../common/models.h"
 #include "../common/protocol.h"
+#include "connection.h"
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -7,10 +8,42 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define DEFAULT_IP      "127.0.0.1"
 #define DEFAULT_PORT    5555
 #define BUFFER_SIZE     1024
+
+void *client_thread(void *arg) {
+    int sockfd = *((int*)arg);
+    char buffer[BUFFER_SIZE];
+    
+    while(1) {
+        ssize_t received = recv(sockfd, buffer, BUFFER_SIZE, 0);
+        if(received <= 0) {
+            printf("%s Connessione chiusa dal server\n", MSG_INFO);
+            exit(0);
+        }
+        
+        size_t total = received;
+        while(total > 0) {
+            char *block = buffer + (received - total);
+            Packet *packet = malloc(sizeof(Packet));
+            packet->id = block[0];
+            packet->size = block[1] + (block[2] << 8);
+            packet->content = malloc(sizeof(char) * packet->size);
+            memcpy(packet->content, block + 3, packet->size);
+            
+            handle_packet(sockfd, packet);
+            
+            total -= packet->size + 3;
+            free(packet->content);
+            free(packet);
+        }
+    }
+    
+    return NULL;
+}
 
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -19,6 +52,7 @@ int main(int argc, char **argv) {
     int port = DEFAULT_PORT;
     int sockfd = 0;
     struct sockaddr_in address;
+    pthread_t tid;
 
     if(argc == 3) {
         ip = argv[1];
@@ -57,34 +91,47 @@ int main(int argc, char **argv) {
     send_packet(sockfd, handshake);
     free(handshake);
     
-    printf("%s Handshake inviato\n", MSG_DEBUG);
-    
-    // Ricevi risposta
-    char buffer[BUFFER_SIZE];
-    ssize_t received = recv(sockfd, buffer, BUFFER_SIZE, 0);
-    if(received > 0) {
-        Packet *packet = malloc(sizeof(Packet));
-        packet->id = buffer[0];
-        packet->size = buffer[1] + (buffer[2] << 8);
-        packet->content = malloc(sizeof(char) * packet->size);
-        memcpy(packet->content, buffer + 3, packet->size);
-        
-        if(packet->id == SERVER_HANDSHAKE) {
-            Server_Handshake *response = (Server_Handshake *)serialize_packet(packet);
-            if(response != NULL) {
-                printf("%s Ricevuto player_id=%d dal server!\n", MSG_INFO, response->player_id);
-                free(response);
-            }
-        }
-        
-        free(packet->content);
-        free(packet);
+    // Avvia thread per ricevere messaggi
+    if(pthread_create(&tid, NULL, client_thread, &sockfd) < 0) {
+        fprintf(stderr, "%s Impossibile creare thread: %s\n", MSG_ERROR, strerror(errno));
+        return 1;
     }
     
-    sleep(1);
+    // Attendi player_id
+    while(player_id == -1) {
+        usleep(100000);
+    }
     
+    printf("\n=== MENU ===\n");
+    
+    int scelta = 0;
+    while(1) {
+        printf("\n1. Crea partita\n");
+        printf("2. Join partita\n");
+        printf("3. Esci\n");
+        printf("> Scegli opzione: ");
+        
+        if(scanf("%d", &scelta) < 0) {
+            continue;
+        }
+        
+        if(scelta == 1) {
+            create_match(sockfd);
+        } else if(scelta == 2) {
+            int match_id;
+            printf("> Inserisci ID partita: ");
+            if(scanf("%d", &match_id) > 0) {
+                join_match(sockfd, match_id);
+            }
+        } else if(scelta == 3) {
+            printf("%s Disconnessione...\n", MSG_INFO);
+            close(sockfd);
+            exit(0);
+        }
+    }
+    
+    pthread_join(tid, NULL);
     close(sockfd);
-    printf("%s Disconnesso\n", MSG_INFO);
     
     return 0;
 }

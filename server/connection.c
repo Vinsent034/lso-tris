@@ -57,6 +57,68 @@ void handle_packet(Client *client, Packet *packet) {
         
         free(response);
         free(handshake);
+        
+        if(serialized != NULL) free(serialized);
+        return;
+    }
+    
+    // Si deve passare prima per l'handshake per i comandi successivi
+    if(client->player->id == -1) {
+        printf("%s Client fd=%d non ha fatto handshake\n", MSG_WARNING, client->conn);
+        if(serialized != NULL) free(serialized);
+        return;
+    }
+    
+    // ===== CREATE MATCH =====
+    if(packet->id == CLIENT_CREATEMATCH) {
+        printf("%s DEBUG: Ricevuto CLIENT_CREATEMATCH da player_id=%d\n", MSG_DEBUG, player_id);
+        
+        if(curr_matches_size < MAX_MATCHES) {
+            Match *new_match = malloc(sizeof(Match));
+            new_match->participants[0] = player;
+            new_match->participants[1] = NULL;
+            new_match->requests_head = NULL;
+            new_match->requests_tail = NULL;
+            new_match->state = STATE_CREATED;
+            new_match->free_slots = 9;
+            new_match->play_again_counter = 0;
+            new_match->id = find_free_id();
+            memset(new_match->grid, 0, sizeof(new_match->grid[0][0]) * 9);
+            
+            add_match(new_match);
+            
+            printf("%s Player id=%d ha creato partita #%d\n", 
+                   MSG_INFO, player_id, new_match->id);
+            
+            // Invia SUCCESS al creatore
+            Packet *success = malloc(sizeof(Packet));
+            success->id = SERVER_SUCCESS;
+            success->content = NULL;
+            send_packet(client->conn, success);
+            free(success);
+            
+            // Broadcast a tutti i client
+            Server_BroadcastMatch *broadcast = malloc(sizeof(Server_BroadcastMatch));
+            broadcast->player_id = player_id;
+            broadcast->match = new_match->id;
+            
+            Packet *bc_packet = malloc(sizeof(Packet));
+            bc_packet->id = SERVER_BROADCASTMATCH;
+            bc_packet->content = broadcast;
+            
+            broadcast_packet(clients, bc_packet, player_id);
+            
+            free(bc_packet);
+            free(broadcast);
+        } else {
+            printf("%s Limite massimo partite raggiunto\n", MSG_WARNING);
+            
+            Packet *error = malloc(sizeof(Packet));
+            error->id = SERVER_ERROR;
+            error->content = NULL;
+            send_packet(client->conn, error);
+            free(error);
+        }
     }
     
     if(serialized != NULL) {

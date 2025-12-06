@@ -66,6 +66,18 @@ void init_socket(int port) {
 
                 curr_clients_size++;
 
+
+
+                // Aggiungi client alla lista
+                ClientNode *node = malloc(sizeof(ClientNode));
+                node->val = new_client;
+                node->next = clients;
+                clients = node;
+
+
+
+
+
                 if(pthread_create(&threads[thread_count], NULL, server_thread, (void *)new_client) < 0) {
                     fprintf(stderr, "%s Impossibile creare thread: %s\n", MSG_ERROR, strerror(errno));
                     close(conn);
