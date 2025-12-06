@@ -50,12 +50,38 @@ int main(int argc, char **argv) {
 
     printf("%s Connesso al server!\n", MSG_INFO);
     
-    // Test: invia un messaggio
-    char *test_msg = "HELLO SERVER";
-    send(sockfd, test_msg, strlen(test_msg), 0);
-    printf("%s Messaggio inviato: %s\n", MSG_DEBUG, test_msg);
-
-    sleep(2);
+    // Invia HANDSHAKE
+    Packet *handshake = malloc(sizeof(Packet));
+    handshake->id = CLIENT_HANDSHAKE;
+    handshake->content = NULL;
+    send_packet(sockfd, handshake);
+    free(handshake);
+    
+    printf("%s Handshake inviato\n", MSG_DEBUG);
+    
+    // Ricevi risposta
+    char buffer[BUFFER_SIZE];
+    ssize_t received = recv(sockfd, buffer, BUFFER_SIZE, 0);
+    if(received > 0) {
+        Packet *packet = malloc(sizeof(Packet));
+        packet->id = buffer[0];
+        packet->size = buffer[1] + (buffer[2] << 8);
+        packet->content = malloc(sizeof(char) * packet->size);
+        memcpy(packet->content, buffer + 3, packet->size);
+        
+        if(packet->id == SERVER_HANDSHAKE) {
+            Server_Handshake *response = (Server_Handshake *)serialize_packet(packet);
+            if(response != NULL) {
+                printf("%s Ricevuto player_id=%d dal server!\n", MSG_INFO, response->player_id);
+                free(response);
+            }
+        }
+        
+        free(packet->content);
+        free(packet);
+    }
+    
+    sleep(1);
     
     close(sockfd);
     printf("%s Disconnesso\n", MSG_INFO);
