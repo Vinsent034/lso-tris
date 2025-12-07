@@ -52,7 +52,7 @@ extern short curr_matches_size;
 
 void add_match(Match *match);
 void remove_match(Match *match);
-Match *get_match_by_id(int id);
+Match *get_match_by_id(MatchList *head, int id);
 int find_free_id();
 void add_requester(Match *match, RequestNode *node);
 void delete_from_head(Match *match);
