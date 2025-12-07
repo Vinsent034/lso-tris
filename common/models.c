@@ -33,8 +33,8 @@ void remove_match(Match *match) {
     }
 }
 
-Match *get_match_by_id(int id) {
-    MatchList *curr = matches;
+Match *get_match_by_id(MatchList *head, int id) {
+    MatchList *curr = head;
     while(curr != NULL) {
         if(curr->val->id == id) {
             return curr->val;

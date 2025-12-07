@@ -6,10 +6,15 @@
 #include <string.h>
 
 int player_id = -1;
+char client_grid[3][3];
+int current_match_id = -1;
+int current_state = -1;
+int pending_request_player = -1;
+int pending_request_match = -1;
 
-void handle_packet(int sockfd __attribute__((unused)), Packet *packet) {
+void handle_packet(int sockfd, Packet *packet) {
     void *serialized = serialize_packet(packet);
-    
+
     if(packet->id == SERVER_HANDSHAKE) {
         if(serialized != NULL) {
             Server_Handshake *response = (Server_Handshake *)serialized;
@@ -19,31 +24,155 @@ void handle_packet(int sockfd __attribute__((unused)), Packet *packet) {
             }
         }
     }
-    
+
     if(packet->id == SERVER_SUCCESS) {
         printf("%s Operazione completata con successo\n", MSG_INFO);
     }
-    
+
     if(packet->id == SERVER_ERROR) {
         printf("%s Errore dal server\n", MSG_ERROR);
     }
-    
+
+    if(packet->id == SERVER_MATCHREQUEST) {
+        if(serialized != NULL) {
+            Server_MatchRequest *req = (Server_MatchRequest *)serialized;
+            pending_request_player = req->other_player;
+            pending_request_match = req->match;
+            printf("\n\n%s ===============================================\n", MSG_INFO);
+            printf("%s RICHIESTA DI GIOCO!\n", MSG_INFO);
+            printf("%s Il player #%d vuole unirsi alla tua partita #%d\n",
+                   MSG_INFO, req->other_player, req->match);
+            printf("%s Usa l'opzione 5 del menu per accettare o rifiutare\n", MSG_INFO);
+            printf("%s ===============================================\n\n", MSG_INFO);
+        }
+    }
+
+    if(packet->id == SERVER_UPDATEONREQUEST) {
+        if(serialized != NULL) {
+            Server_UpdateOnRequest *update = (Server_UpdateOnRequest *)serialized;
+            if(update->accepted) {
+                printf("\n%s La tua richiesta è stata ACCETTATA! Partita #%d inizia!\n",
+                       MSG_INFO, update->match);
+            } else {
+                printf("\n%s La tua richiesta è stata RIFIUTATA per la partita #%d\n",
+                       MSG_ERROR, update->match);
+            }
+        }
+    }
+
     if(packet->id == SERVER_BROADCASTMATCH) {
         if(serialized != NULL) {
             Server_BroadcastMatch *bc = (Server_BroadcastMatch *)serialized;
-            printf("%s Nuova partita disponibile: #%d (creata da player #%d)\n", 
+            printf("%s Nuova partita disponibile: #%d (creata da player #%d)\n",
                    MSG_INFO, bc->match, bc->player_id);
         }
     }
-    
+
+    if(packet->id == SERVER_NOTICESTATE) {
+        if(serialized != NULL) {
+            Server_NoticeState *state = (Server_NoticeState *)serialized;
+            current_state = state->state;
+            current_match_id = state->match;
+
+            switch(state->state) {
+                case STATE_TURN_PLAYER1:
+                case STATE_TURN_PLAYER2:
+                    printf("\n%s Partita #%d - %s\n", MSG_INFO, state->match,
+                           (state->state == STATE_TURN_PLAYER1) ? "Turno Player 1 (X)" : "Turno Player 2 (O)");
+                    // Visualizza griglia
+                    printf("     0   1   2\n");
+                    printf("   +---+---+---+\n");
+                    for(int i = 0; i < 3; i++) {
+                        printf(" %d |", i);
+                        for(int j = 0; j < 3; j++) {
+                            char c = client_grid[i][j];
+                            if(c == 0) c = ' ';
+                            printf(" %c |", c);
+                        }
+                        printf("\n   +---+---+---+\n");
+                    }
+
+                    // Indica se è il tuo turno
+                    int my_turn = 0;
+                    if(state->state == STATE_TURN_PLAYER1 && player_id == current_match_id) {
+                        // Sei player 1 se hai creato la partita - approssimazione
+                        // In realtà dovremmo tracciare meglio chi siamo
+                        my_turn = 1;
+                    }
+                    if(my_turn) {
+                        printf("%s È il tuo turno! Usa opzione 4 del menu per giocare.\n", MSG_INFO);
+                    }
+                    break;
+
+                case STATE_WIN:
+                    printf("\n%s HAI VINTO! Partita #%d\n", MSG_INFO, state->match);
+                    printf("=========================\n");
+                    current_match_id = -1;
+                    memset(client_grid, 0, sizeof(client_grid));
+                    break;
+
+                case STATE_LOSE:
+                    printf("\n%s Hai perso. Partita #%d\n", MSG_ERROR, state->match);
+                    printf("=========================\n");
+                    current_match_id = -1;
+                    memset(client_grid, 0, sizeof(client_grid));
+                    break;
+
+                case STATE_DRAW:
+                    printf("\n%s PAREGGIO! Partita #%d\n", MSG_INFO, state->match);
+                    printf("=========================\n");
+                    current_match_id = -1;
+                    memset(client_grid, 0, sizeof(client_grid));
+                    break;
+
+                case STATE_INPROGRESS:
+                    printf("%s Partita #%d in corso...\n", MSG_INFO, state->match);
+                    current_match_id = state->match;
+                    memset(client_grid, 0, sizeof(client_grid));
+                    break;
+            }
+        }
+    }
+
+    if(packet->id == SERVER_NOTICEMOVE) {
+        if(serialized != NULL) {
+            Server_NoticeMove *move = (Server_NoticeMove *)serialized;
+            printf("%s Mossa: (%d,%d)\n", MSG_INFO, move->moveX, move->moveY);
+
+            // Aggiorna griglia locale
+            // Il turno corrente indica chi HA APPENA GIOCATO (il precedente)
+            // Se current_state è TURN_PLAYER1, vuol dire che player2 ha appena giocato
+            if(current_state == STATE_TURN_PLAYER1) {
+                client_grid[move->moveX][move->moveY] = 'O'; // Player 2 ha giocato
+            } else if(current_state == STATE_TURN_PLAYER2) {
+                client_grid[move->moveX][move->moveY] = 'X'; // Player 1 ha giocato
+            }
+        }
+    }
+
     if(serialized != NULL) {
         free(serialized);
+    }
+}
+
+void print_grid() {
+    printf("     0   1   2\n");
+    printf("   +---+---+---+\n");
+    for(int i = 0; i < 3; i++) {
+        printf(" %d |", i);
+        for(int j = 0; j < 3; j++) {
+            char c = client_grid[i][j];
+            if(c == 0) c = ' ';
+            printf(" %c |", c);
+        }
+        printf("\n   +---+---+---+\n");
     }
 }
 
 void create_match(int sockfd) {
     Packet *packet = malloc(sizeof(Packet));
     packet->id = CLIENT_CREATEMATCH;
+
     packet->content = NULL;
     send_packet(sockfd, packet);
     free(packet);
@@ -53,14 +182,56 @@ void create_match(int sockfd) {
 void join_match(int sockfd, int match_id) {
     Client_JoinMatch *join = malloc(sizeof(Client_JoinMatch));
     join->match = match_id;
-    
+
     Packet *packet = malloc(sizeof(Packet));
     packet->id = CLIENT_JOINMATCH;
     packet->content = join;
     send_packet(sockfd, packet);
-    
+
     free(packet);
     free(join);
-    
+
     printf("%s Richiesta join partita #%d inviata\n", MSG_DEBUG, match_id);
+}
+
+void make_move(int sockfd, int match_id, int x, int y) {
+    Client_MakeMove *move = malloc(sizeof(Client_MakeMove));
+    move->moveX = x;
+    move->moveY = y;
+    move->match = match_id;
+
+    Packet *packet = malloc(sizeof(Packet));
+    packet->id = CLIENT_MAKEMOVE;
+    packet->content = move;
+    send_packet(sockfd, packet);
+
+    free(packet);
+    free(move);
+
+    printf("%s Mossa inviata: (%d,%d) partita #%d\n", MSG_DEBUG, x, y, match_id);
+}
+
+void respond_to_request(int sockfd, int accepted) {
+    if(pending_request_match == -1) {
+        printf("%s Nessuna richiesta pendente!\n", MSG_ERROR);
+        return;
+    }
+
+    Client_ModifyRequest *modify = malloc(sizeof(Client_ModifyRequest));
+    modify->accepted = accepted;
+    modify->match = pending_request_match;
+
+    Packet *packet = malloc(sizeof(Packet));
+    packet->id = CLIENT_MODIFYREQUEST;
+    packet->content = modify;
+    send_packet(sockfd, packet);
+
+    free(packet);
+    free(modify);
+
+    printf("%s Risposta inviata: %s\n", MSG_INFO, accepted ? "ACCETTATO" : "RIFIUTATO");
+
+    // Reset pending request
+    pending_request_player = -1;
+    pending_request_match = -1;
 }

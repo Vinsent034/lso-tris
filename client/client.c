@@ -108,13 +108,17 @@ int main(int argc, char **argv) {
     while(1) {
         printf("\n1. Crea partita\n");
         printf("2. Join partita\n");
-        printf("3. Esci\n");
+        printf("3. Fai una mossa\n");
+        if(pending_request_match != -1) {
+            printf("5. Rispondi a richiesta (player #%d vuole giocare) [PENDENTE]\n", pending_request_player);
+        }
+        printf("9. Esci\n");
         printf("> Scegli opzione: ");
-        
+
         if(scanf("%d", &scelta) < 0) {
             continue;
         }
-        
+
         if(scelta == 1) {
             create_match(sockfd);
         } else if(scelta == 2) {
@@ -124,6 +128,29 @@ int main(int argc, char **argv) {
                 join_match(sockfd, match_id);
             }
         } else if(scelta == 3) {
+            if(current_match_id == -1) {
+                printf("%s Non sei in una partita attiva!\n", MSG_ERROR);
+            } else {
+                int x, y;
+                printf("> Inserisci riga (0-2): ");
+                if(scanf("%d", &x) > 0) {
+                    printf("> Inserisci colonna (0-2): ");
+                    if(scanf("%d", &y) > 0) {
+                        make_move(sockfd, current_match_id, x, y);
+                    }
+                }
+            }
+        } else if(scelta == 5) {
+            if(pending_request_match != -1) {
+                int accept;
+                printf("> Accetti? (1=Sì, 0=No): ");
+                if(scanf("%d", &accept) > 0) {
+                    respond_to_request(sockfd, accept);
+                }
+            } else {
+                printf("%s Nessuna richiesta pendente!\n", MSG_ERROR);
+            }
+        } else if(scelta == 9) {
             printf("%s Disconnessione...\n", MSG_INFO);
             close(sockfd);
             exit(0);

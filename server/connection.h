@@ -14,4 +14,9 @@ void *server_thread(void *args);
 void *joiner_thread(void *args);
 void handle_packet(Client *client, Packet *packet);
 
+// Game logic helpers
+int check_winner(Match *match);
+int is_board_full(Match *match);
+void end_match(Match *match, int winner_index);
+
 #endif

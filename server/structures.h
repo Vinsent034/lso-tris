@@ -20,5 +20,7 @@ extern ClientNode *clients;
 extern short curr_clients_size;
 
 void broadcast_packet(ClientNode *head, Packet *packet, int except);
+int get_socket_by_player_id(int player_id);
+void remove_client_from_list(Client *client);
 
 #endif
