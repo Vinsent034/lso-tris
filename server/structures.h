@@ -4,6 +4,7 @@
 #include "../common/models.h"
 #include "../common/protocol.h"
 #include <netinet/in.h>
+#include <pthread.h>
 
 typedef struct {
     int conn;
@@ -19,8 +20,17 @@ typedef struct ClientNode {
 extern ClientNode *clients;
 extern short curr_clients_size;
 
+// Mutex per thread safety
+extern pthread_mutex_t clients_mutex;
+extern pthread_mutex_t matches_mutex;
+
 void broadcast_packet(ClientNode *head, Packet *packet, int except);
 int get_socket_by_player_id(int player_id);
 void remove_client_from_list(Client *client);
+
+// Thread-safe wrappers per operazioni su matches
+void safe_add_match(Match *match);
+void safe_remove_match(Match *match);
+Match *safe_get_match_by_id(int id);
 
 #endif

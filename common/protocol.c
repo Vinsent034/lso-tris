@@ -16,7 +16,7 @@ void send_packet(int sockfd, Packet *packet) {
         serialized[3] = ((Server_Handshake *)packet->content)->player_id;
     }
     
-    if(packet->id == SERVER_SUCCESS || packet->id == SERVER_ERROR) {
+    if(packet->id == SERVER_SUCCESS || packet->id == SERVER_ERROR || packet->id == SERVER_INVALID_MOVE) {
         packet->size = 0;
     }
     
@@ -79,7 +79,12 @@ void send_packet(int sockfd, Packet *packet) {
         serialized[3] = ((Client_PlayAgain *)packet->content)->choice;
         serialized[4] = ((Client_PlayAgain *)packet->content)->match;
     }
-    
+
+    if(packet->id == CLIENT_QUITMATCH) {
+        packet->size = 1;
+        serialized[3] = ((Client_QuitMatch *)packet->content)->match;
+    }
+
     // Little endian size
     serialized[1] = packet->size & 0xFF;
     serialized[2] = (packet->size >> 8) & 0xFF;
@@ -134,7 +139,14 @@ void *serialize_packet(Packet *packet) {
         new->match = ((char *)packet->content)[1];
         return new;
     }
-    
+
+    if(packet->id == CLIENT_QUITMATCH) {
+        if(packet->size < 1) return NULL;
+        Client_QuitMatch *new = malloc(sizeof(Client_QuitMatch));
+        new->match = ((char *)packet->content)[0];
+        return new;
+    }
+
     // ===== SERVER PACKETS =====
     if(packet->id == SERVER_HANDSHAKE) {
         if(packet->size < 1) return NULL;

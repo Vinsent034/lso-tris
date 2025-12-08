@@ -1,11 +1,17 @@
 #include "structures.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 ClientNode *clients = NULL;
 short curr_clients_size = 0;
 
+// Mutex globali per thread safety
+pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t matches_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 void broadcast_packet(ClientNode *head, Packet *packet, int except) {
+    pthread_mutex_lock(&clients_mutex);
     ClientNode *current = head;
     while(current != NULL) {
         if(current->val->conn != except) {
@@ -13,20 +19,26 @@ void broadcast_packet(ClientNode *head, Packet *packet, int except) {
         }
         current = current->next;
     }
+    pthread_mutex_unlock(&clients_mutex);
 }
 
 int get_socket_by_player_id(int player_id) {
+    pthread_mutex_lock(&clients_mutex);
     ClientNode *current = clients;
+    int result = -1;
     while(current != NULL) {
         if(current->val->player != NULL && current->val->player->id == player_id) {
-            return current->val->conn;
+            result = current->val->conn;
+            break;
         }
         current = current->next;
     }
-    return -1; // Not found
+    pthread_mutex_unlock(&clients_mutex);
+    return result;
 }
 
 void remove_client_from_list(Client *client) {
+    pthread_mutex_lock(&clients_mutex);
     ClientNode *current = clients;
     ClientNode *prev = NULL;
 
@@ -39,9 +51,31 @@ void remove_client_from_list(Client *client) {
                 prev->next = current->next;
             }
             free(current);
+            pthread_mutex_unlock(&clients_mutex);
             return;
         }
         prev = current;
         current = current->next;
     }
+    pthread_mutex_unlock(&clients_mutex);
+}
+
+// Thread-safe wrappers per operazioni su matches
+void safe_add_match(Match *match) {
+    pthread_mutex_lock(&matches_mutex);
+    add_match(match);
+    pthread_mutex_unlock(&matches_mutex);
+}
+
+void safe_remove_match(Match *match) {
+    pthread_mutex_lock(&matches_mutex);
+    remove_match(match);
+    pthread_mutex_unlock(&matches_mutex);
+}
+
+Match *safe_get_match_by_id(int id) {
+    pthread_mutex_lock(&matches_mutex);
+    Match *result = get_match_by_id(matches, id);
+    pthread_mutex_unlock(&matches_mutex);
+    return result;
 }

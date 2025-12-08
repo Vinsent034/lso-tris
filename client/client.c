@@ -105,12 +105,84 @@ int main(int argc, char **argv) {
     printf("\n=== MENU ===\n");
     
     int scelta = 0;
+    char input[100];
+
     while(1) {
+        // Se è il mio turno, chiedi automaticamente le coordinate
+        if(my_turn_flag == 1) {
+            // Pulisci stdin se necessario (dopo errore di casella occupata)
+            if(clear_stdin_flag == 1) {
+                int c;
+                while ((c = getchar()) != '\n' && c != EOF);
+                clear_stdin_flag = 0;
+            }
+
+            printf("\nInserisci prima coordinata (riga 0-2, oppure 'N' per uscire): ");
+            if(scanf("%s", input) > 0) {
+                // Controlla se vuole uscire
+                if(input[0] == 'N' || input[0] == 'n') {
+                    printf("\n%s Sei uscito dalla partita.\n", MSG_INFO);
+                    quit_match(sockfd, current_match_id);
+                    current_match_id = -1;
+                    my_turn_flag = 0;
+                    match_ended = 0;
+                    memset(client_grid, 0, sizeof(client_grid));
+                    continue;
+                }
+
+                int x = atoi(input);
+                if(x < 0 || x > 2) {
+                    printf("%s Coordinata non valida! Deve essere tra 0 e 2.\n", MSG_ERROR);
+                    continue;
+                }
+
+                printf("Inserisci seconda coordinata (colonna 0-2, oppure 'N' per uscire): ");
+                if(scanf("%s", input) > 0) {
+                    // Controlla se vuole uscire
+                    if(input[0] == 'N' || input[0] == 'n') {
+                        printf("\n%s Sei uscito dalla partita.\n", MSG_INFO);
+                        quit_match(sockfd, current_match_id);
+                        current_match_id = -1;
+                        my_turn_flag = 0;
+                        match_ended = 0;
+                        memset(client_grid, 0, sizeof(client_grid));
+                        continue;
+                    }
+
+                    int y = atoi(input);
+                    if(y < 0 || y > 2) {
+                        printf("%s Coordinata non valida! Deve essere tra 0 e 2.\n", MSG_ERROR);
+                        continue;
+                    }
+
+                    // Invia la mossa
+                    make_move(sockfd, current_match_id, x, y);
+                    my_turn_flag = 0; // Reset flag dopo aver giocato
+                }
+            }
+            continue;
+        }
+
+        // Se siamo in una partita attiva e non è il nostro turno, aspetta senza mostrare menu
+        if(current_match_id != -1 && match_ended == 0 && my_turn_flag == 0) {
+            usleep(100000); // Aspetta 100ms
+            continue; // Controlla di nuovo se è diventato il nostro turno
+        }
+
+        // Controlla se nel frattempo è diventato il nostro turno
+        if(my_turn_flag == 1) {
+            continue; // Salta il menu e vai direttamente al prompt coordinate
+        }
+
+        // Menu normale quando non è il tuo turno (e non sei in partita)
         printf("\n1. Crea partita\n");
         printf("2. Join partita\n");
-        printf("3. Fai una mossa\n");
+        printf("4. Visualizza griglia\n");
         if(pending_request_match != -1) {
             printf("5. Rispondi a richiesta (player #%d vuole giocare) [PENDENTE]\n", pending_request_player);
+        }
+        if(match_ended == 1) {
+            printf("6. Gioca ancora [DISPONIBILE]\n");
         }
         printf("9. Esci\n");
         printf("> Scegli opzione: ");
@@ -119,26 +191,28 @@ int main(int argc, char **argv) {
             continue;
         }
 
+        // Dopo aver letto l'input, ricontrolla se è diventato il nostro turno
+        if(my_turn_flag == 1) {
+            continue; // Ignora l'input e vai al prompt coordinate
+        }
+
         if(scelta == 1) {
             create_match(sockfd);
         } else if(scelta == 2) {
             int match_id;
             printf("> Inserisci ID partita: ");
             if(scanf("%d", &match_id) > 0) {
-                join_match(sockfd, match_id);
+                if(match_id < 0 || match_id > 255) {
+                    printf("%s ID partita non valido! Deve essere tra 0 e 255.\n", MSG_ERROR);
+                } else {
+                    join_match(sockfd, match_id);
+                }
             }
-        } else if(scelta == 3) {
+        } else if(scelta == 4) {
             if(current_match_id == -1) {
                 printf("%s Non sei in una partita attiva!\n", MSG_ERROR);
             } else {
-                int x, y;
-                printf("> Inserisci riga (0-2): ");
-                if(scanf("%d", &x) > 0) {
-                    printf("> Inserisci colonna (0-2): ");
-                    if(scanf("%d", &y) > 0) {
-                        make_move(sockfd, current_match_id, x, y);
-                    }
-                }
+                print_grid(client_grid);
             }
         } else if(scelta == 5) {
             if(pending_request_match != -1) {
@@ -149,6 +223,16 @@ int main(int argc, char **argv) {
                 }
             } else {
                 printf("%s Nessuna richiesta pendente!\n", MSG_ERROR);
+            }
+        } else if(scelta == 6) {
+            if(match_ended == 1 && current_match_id != -1) {
+                int choice;
+                printf("> Vuoi giocare ancora? (1=Sì, 0=No): ");
+                if(scanf("%d", &choice) > 0) {
+                    play_again(sockfd, current_match_id, choice);
+                }
+            } else {
+                printf("%s Nessuna partita terminata da cui rigiocare!\n", MSG_ERROR);
             }
         } else if(scelta == 9) {
             printf("%s Disconnessione...\n", MSG_INFO);

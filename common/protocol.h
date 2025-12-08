@@ -14,6 +14,7 @@ typedef struct {
 #define CLIENT_MODIFYREQUEST    4
 #define CLIENT_MAKEMOVE         5
 #define CLIENT_PLAYAGAIN        6
+#define CLIENT_QUITMATCH        7
 
 typedef struct {
     int match;
@@ -35,6 +36,10 @@ typedef struct {
     int match;
 } Client_PlayAgain;
 
+typedef struct {
+    int match;
+} Client_QuitMatch;
+
 // ===== PACCHETTI SERVER -> CLIENT =====
 #define SERVER_HANDSHAKE        20
 #define SERVER_SUCCESS          21
@@ -44,6 +49,7 @@ typedef struct {
 #define SERVER_NOTICEMOVE       25
 #define SERVER_BROADCASTMATCH   26
 #define SERVER_UPDATEONREQUEST  30
+#define SERVER_INVALID_MOVE     31
 
 typedef struct {
     int player_id;

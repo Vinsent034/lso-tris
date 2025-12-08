@@ -14,7 +14,71 @@ void *joiner_thread(void *args) {
     JoinerThreadArgs *thread_args = (JoinerThreadArgs*)args;
     pthread_join(thread_args->thread, NULL);
 
-    printf("%s Connessione chiusa (fd=%d)\n", MSG_INFO, thread_args->client->conn);
+    int player_id = thread_args->client->conn % 255;
+    printf("%s Connessione chiusa (Player id=%d, fd=%d)\n", MSG_INFO, player_id, thread_args->client->conn);
+
+    // Trova partite a cui partecipa il player
+    MatchList *current = matches;
+    while(current != NULL) {
+        Match *match = current->val;
+        MatchList *next = current->next;  // Salva next prima di possibile rimozione
+
+        if(match != NULL) {
+            // Verifica se il player disconnesso è in questa partita
+            int is_participant = 0;
+            int other_player_id = -1;
+
+            if(match->participants[0] != NULL && match->participants[0]->id == player_id) {
+                is_participant = 1;
+                if(match->participants[1] != NULL) {
+                    other_player_id = match->participants[1]->id;
+                }
+            } else if(match->participants[1] != NULL && match->participants[1]->id == player_id) {
+                is_participant = 1;
+                if(match->participants[0] != NULL) {
+                    other_player_id = match->participants[0]->id;
+                }
+            }
+
+            if(is_participant) {
+                printf("%s Player id=%d disconnesso da Match id=%d\n", MSG_WARNING, player_id, match->id);
+
+                // Notifica l'altro player che la partita è terminata
+                if(other_player_id != -1) {
+                    int other_fd = get_socket_by_player_id(other_player_id);
+                    if(other_fd != -1) {
+                        Server_NoticeState *term_state = malloc(sizeof(Server_NoticeState));
+                        term_state->state = STATE_TERMINATED;
+                        term_state->match = match->id;
+
+                        Packet *term_packet = malloc(sizeof(Packet));
+                        term_packet->id = SERVER_NOTICESTATE;
+                        term_packet->content = term_state;
+
+                        send_packet(other_fd, term_packet);
+
+                        free(term_packet);
+                        free(term_state);
+
+                        printf("%s Notifica disconnessione inviata a Player id=%d\n", MSG_INFO, other_player_id);
+                    }
+
+                    // Reset busy flag dell'altro player
+                    if(match->participants[0] != NULL && match->participants[0]->id == other_player_id) {
+                        match->participants[0]->busy = 0;
+                    } else if(match->participants[1] != NULL && match->participants[1]->id == other_player_id) {
+                        match->participants[1]->busy = 0;
+                    }
+                }
+
+                // Rimuovi la partita
+                remove_match(match);
+                printf("%s Match id=%d rimosso a causa della disconnessione\n", MSG_INFO, match->id);
+            }
+        }
+
+        current = next;
+    }
 
     // Reset busy flag se il player era in partita
     if(thread_args->client->player != NULL) {
@@ -460,9 +524,10 @@ void handle_packet(Client *client, Packet *packet) {
                                     free(state_notice);
                                 }
                             } else {
-                                printf("%s Player id=%d: casella occupata\n", MSG_WARNING, player_id);
+                                printf("%s Player id=%d: casella (%d,%d) già occupata\n",
+                                       MSG_WARNING, player_id, _packet->moveX, _packet->moveY);
                                 Packet *error = malloc(sizeof(Packet));
-                                error->id = SERVER_ERROR;
+                                error->id = SERVER_INVALID_MOVE;
                                 error->content = NULL;
                                 send_packet(client->conn, error);
                                 free(error);
@@ -486,6 +551,202 @@ void handle_packet(Client *client, Packet *packet) {
                 } else {
                     printf("%s Player id=%d non è in Match id=%d\n", MSG_WARNING, player_id, _packet->match);
                 }
+            }
+        }
+    }
+
+
+    // ===== PLAY AGAIN =====
+    if(packet->id == CLIENT_PLAYAGAIN) {
+        if(serialized != NULL) {
+            Client_PlayAgain *_packet = (Client_PlayAgain *)serialized;
+            Match *found_match = get_match_by_id(matches, _packet->match);
+
+            if(found_match != NULL && found_match->state == STATE_TERMINATED) {
+                // Verifica che il player sia in questa partita
+                int player_index = -1;
+                if(found_match->participants[0]->id == player_id) {
+                    player_index = 0;
+                } else if(found_match->participants[1]->id == player_id) {
+                    player_index = 1;
+                }
+
+                if(player_index != -1) {
+                    if(_packet->choice == 1) {
+                        // Il player vuole giocare ancora
+                        printf("%s Player id=%d vuole giocare ancora Match id=%d\n",
+                               MSG_INFO, player_id, _packet->match);
+
+                        // Registra il player come "pronto"
+                        found_match->play_again[player_index] = found_match->participants[player_index];
+                        found_match->play_again_counter++;
+
+                        // Se entrambi i player vogliono giocare ancora
+                        if(found_match->play_again_counter == 2) {
+                            printf("%s Entrambi i player vogliono giocare ancora. Riavvio Match id=%d\n",
+                                   MSG_INFO, _packet->match);
+
+                            // Reset della partita
+                            memset(found_match->grid, 0, sizeof(found_match->grid));
+                            found_match->free_slots = 9;
+                            found_match->state = STATE_TURN_PLAYER1;
+                            found_match->play_again_counter = 0;
+                            found_match->play_again[0] = NULL;
+                            found_match->play_again[1] = NULL;
+
+                            // Resetta busy flags
+                            found_match->participants[0]->busy = 1;
+                            found_match->participants[1]->busy = 1;
+
+                            // Notifica entrambi i giocatori che la partita ricomincia
+                            Server_NoticeState *restart_state = malloc(sizeof(Server_NoticeState));
+                            restart_state->state = STATE_TURN_PLAYER1;
+                            restart_state->match = _packet->match;
+
+                            Packet *restart_packet = malloc(sizeof(Packet));
+                            restart_packet->id = SERVER_NOTICESTATE;
+                            restart_packet->content = restart_state;
+
+                            int p0_fd = get_socket_by_player_id(found_match->participants[0]->id);
+                            int p1_fd = get_socket_by_player_id(found_match->participants[1]->id);
+
+                            if(p0_fd != -1) send_packet(p0_fd, restart_packet);
+                            if(p1_fd != -1) send_packet(p1_fd, restart_packet);
+
+                            free(restart_packet);
+                            free(restart_state);
+
+                            printf("%s Match id=%d riavviato con successo\n", MSG_INFO, _packet->match);
+                        } else {
+                            // Solo un giocatore ha detto sì, aspetta l'altro
+                            printf("%s Match id=%d in attesa dell'altro player\n", MSG_INFO, _packet->match);
+
+                            Packet *success = malloc(sizeof(Packet));
+                            success->id = SERVER_SUCCESS;
+                            success->content = NULL;
+                            send_packet(client->conn, success);
+                            free(success);
+                        }
+                    } else {
+                        // Il player NON vuole giocare ancora
+                        printf("%s Player id=%d NON vuole giocare ancora Match id=%d\n",
+                               MSG_INFO, player_id, _packet->match);
+
+                        // Reset counter e rimuovi la partita
+                        found_match->play_again_counter = 0;
+                        found_match->play_again[0] = NULL;
+                        found_match->play_again[1] = NULL;
+
+                        // Notifica l'altro giocatore che la partita è definitivamente terminata
+                        int other_index = (player_index == 0) ? 1 : 0;
+                        int other_fd = get_socket_by_player_id(found_match->participants[other_index]->id);
+
+                        Server_NoticeState *end_state = malloc(sizeof(Server_NoticeState));
+                        end_state->state = STATE_TERMINATED;
+                        end_state->match = _packet->match;
+
+                        Packet *end_packet = malloc(sizeof(Packet));
+                        end_packet->id = SERVER_NOTICESTATE;
+                        end_packet->content = end_state;
+
+                        if(other_fd != -1) send_packet(other_fd, end_packet);
+
+                        free(end_packet);
+                        free(end_state);
+
+                        // Rimuovi la partita
+                        remove_match(found_match);
+                        printf("%s Match id=%d rimosso definitivamente\n", MSG_INFO, _packet->match);
+                    }
+                } else {
+                    printf("%s Player id=%d non è in Match id=%d\n",
+                           MSG_WARNING, player_id, _packet->match);
+
+                    Packet *error = malloc(sizeof(Packet));
+                    error->id = SERVER_ERROR;
+                    error->content = NULL;
+                    send_packet(client->conn, error);
+                    free(error);
+                }
+            } else {
+                printf("%s Match id=%d non valido o non terminato\n",
+                       MSG_WARNING, _packet->match);
+
+                Packet *error = malloc(sizeof(Packet));
+                error->id = SERVER_ERROR;
+                error->content = NULL;
+                send_packet(client->conn, error);
+                free(error);
+            }
+        }
+    }
+
+
+    // ===== QUIT MATCH =====
+    if(packet->id == CLIENT_QUITMATCH) {
+        if(serialized != NULL) {
+            Client_QuitMatch *_packet = (Client_QuitMatch *)serialized;
+            Match *found_match = get_match_by_id(matches, _packet->match);
+
+            if(found_match != NULL) {
+                // Verifica che il player sia in questa partita
+                int player_index = -1;
+                int other_player_id = -1;
+
+                if(found_match->participants[0]->id == player_id) {
+                    player_index = 0;
+                    if(found_match->participants[1] != NULL) {
+                        other_player_id = found_match->participants[1]->id;
+                    }
+                } else if(found_match->participants[1]->id == player_id) {
+                    player_index = 1;
+                    if(found_match->participants[0] != NULL) {
+                        other_player_id = found_match->participants[0]->id;
+                    }
+                }
+
+                if(player_index != -1) {
+                    printf("%s Player id=%d è uscito dalla partita #%d\n",
+                           MSG_INFO, player_id, _packet->match);
+
+                    // Notifica l'altro giocatore che ha vinto per abbandono
+                    if(other_player_id != -1) {
+                        int other_fd = get_socket_by_player_id(other_player_id);
+                        if(other_fd != -1) {
+                            Server_NoticeState *win_state = malloc(sizeof(Server_NoticeState));
+                            win_state->state = STATE_WIN;
+                            win_state->match = _packet->match;
+
+                            Packet *win_packet = malloc(sizeof(Packet));
+                            win_packet->id = SERVER_NOTICESTATE;
+                            win_packet->content = win_state;
+
+                            send_packet(other_fd, win_packet);
+
+                            free(win_packet);
+                            free(win_state);
+
+                            printf("%s Player id=%d vince per abbandono\n", MSG_INFO, other_player_id);
+                        }
+
+                        // Reset busy flags
+                        if(found_match->participants[0] != NULL) {
+                            found_match->participants[0]->busy = 0;
+                        }
+                        if(found_match->participants[1] != NULL) {
+                            found_match->participants[1]->busy = 0;
+                        }
+                    }
+
+                    // Rimuovi la partita
+                    remove_match(found_match);
+                    printf("%s Match id=%d rimosso per abbandono\n", MSG_INFO, _packet->match);
+                } else {
+                    printf("%s Player id=%d non è in Match id=%d\n",
+                           MSG_WARNING, player_id, _packet->match);
+                }
+            } else {
+                printf("%s Match id=%d non trovato\n", MSG_WARNING, _packet->match);
             }
         }
     }
