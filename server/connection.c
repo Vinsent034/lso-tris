@@ -10,9 +10,39 @@
 
 #define BUFFER_SIZE 1024
 
+
+
+
+
+
+/*
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║                      JOINER_THREAD - Cleanup Thread                   ║
+ * ║                                                                        ║
+ * ║  Thread di cleanup che gestisce la disconnessione dei client          ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ *
+ * Parametri:
+ *   args - JoinerThreadArgs contenente il Client e il thread da joinare
+ *
+ * Funzionamento:
+ *   1. pthread_join() aspetta che server_thread termini
+ *   2. Cerca tutte le partite a cui il player partecipa
+ *   3. Per ogni partita trovata:
+ *      - Notifica l'altro giocatore con STATE_TERMINATED
+ *      - Reset flag busy dell'altro giocatore
+ *      - Rimuove la partita dal server
+ *   4. Rimuove il client dalla lista globale
+ *   5. Decrementa curr_clients_size
+ *   6. Libera tutta la memoria (player, client, args)
+ *
+ * Nota: Questo thread è essenziale per evitare memory leak e partite
+ *       "appese" quando un client si disconnette improvvisamente
+ */
 void *joiner_thread(void *args) {
     JoinerThreadArgs *thread_args = (JoinerThreadArgs*)args;
-    pthread_join(thread_args->thread, NULL);
+    // Attende che server_thread termini (client disconnesso)
+    pthread_join(thread_args->thread, NULL); 
 
     int player_id = thread_args->client->conn % 255;
     printf("%s Connessione chiusa (Player id=%d, fd=%d)\n", MSG_INFO, player_id, thread_args->client->conn);
@@ -27,7 +57,7 @@ void *joiner_thread(void *args) {
             // Verifica se il player disconnesso è in questa partita
             int is_participant = 0;
             int other_player_id = -1;
-
+                // verifico chi era il primo player e chi il secondo , andando a salvare i loro id
             if(match->participants[0] != NULL && match->participants[0]->id == player_id) {
                 is_participant = 1;
                 if(match->participants[1] != NULL) {
@@ -40,10 +70,12 @@ void *joiner_thread(void *args) {
                 }
             }
 
+
+            // qui se il player esisteva mi occupo di segnaleare la sua uscita 
             if(is_participant) {
                 printf("%s Player id=%d disconnesso da Match id=%d\n", MSG_WARNING, player_id, match->id);
 
-                // Notifica l'altro player che la partita è terminata
+                // Notifica l'altro player che la partita è terminata, creadno uno stato di notifica e asseganondogli lo stato di Terminazione
                 if(other_player_id != -1) {
                     int other_fd = get_socket_by_player_id(other_player_id);
                     if(other_fd != -1) {
@@ -96,20 +128,58 @@ void *joiner_thread(void *args) {
     return NULL;
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║                       HANDLE_PACKET - DISPATCHER                       ║
+ * ║                                                                        ║
+ * ║  Questa funzione gestisce tutti i pacchetti ricevuti dai client.      ║
+ * ║  È organizzata in sezioni per tipo di operazione:                     ║
+ * ║  1. Handshake           - Autenticazione iniziale                     ║
+ * ║  2. Create Match        - Creazione nuove partite                     ║
+ * ║  3. Join Match          - Richiesta di entrare in partita             ║
+ * ║  4. Modify Request      - Accept/Reject richieste di join             ║
+ * ║  5. Make Move           - Esecuzione mosse durante il gioco           ║
+ * ║  6. Play Again          - Gestione rivincita                          ║
+ * ║  7. Quit Match          - Abbandono partita                           ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ */
 void handle_packet(Client *client, Packet *packet) {
     int player_id = client->conn % 255;
     Player *player = client->player;
-    
+
     void *serialized = serialize_packet(packet);
-    
+
     if(DEBUG) {
-        printf("%s Packet(fd=%d, id=%d, size=%d)\n", 
+        printf("%s Packet(fd=%d, id=%d, size=%d)\n",
                MSG_DEBUG, player_id, packet->id, packet->size);
     }
-    
-    // ===== HANDSHAKE =====
+
+    /*
+     * ═══════════════════════════════════════════════════════════════════════
+     *                          1. HANDSHAKE HANDLER
+     * ═══════════════════════════════════════════════════════════════════════
+     * Gestisce l'autenticazione iniziale del client.
+     * - Assegna un player_id univoco basato sul file descriptor
+     * - Risponde con SERVER_HANDSHAKE contenente il player_id
+     * - Deve essere il primo pacchetto inviato dal client
+     * ───────────────────────────────────────────────────────────────────────
+     */
     if(packet->id == CLIENT_HANDSHAKE) {
-        if(client->player->id == -1) {
+        if(client->player->id == -1) {// un casi non esista il client assegno un id
             player->id = player_id;
         }
         
@@ -132,17 +202,32 @@ void handle_packet(Client *client, Packet *packet) {
         return;
     }
     
-    // Si deve passare prima per l'handshake per i comandi successivi
+    /*
+     * ───────────────────────────────────────────────────────────────────────
+     * VALIDAZIONE: Tutti i comandi successivi richiedono handshake
+     * ───────────────────────────────────────────────────────────────────────
+     */
     if(client->player->id == -1) {
         printf("%s Client fd=%d non ha fatto handshake\n", MSG_WARNING, client->conn);
         if(serialized != NULL) free(serialized);
         return;
     }
-    
-    // ===== CREATE MATCH =====
+
+    /*
+     * ═══════════════════════════════════════════════════════════════════════
+     *                       2. CREATE MATCH HANDLER
+     * ═══════════════════════════════════════════════════════════════════════
+     * Gestisce la creazione di una nuova partita.
+     * - Verifica che non si sia superato il limite di partite (MAX_MATCHES)
+     * - Crea una nuova Match con il player corrente come proprietario
+     * - Invia SERVER_SUCCESS al creatore
+     * - Fa broadcast a tutti i client della nuova partita disponibile
+     * ───────────────────────────────────────────────────────────────────────
+     */
     if(packet->id == CLIENT_CREATEMATCH) {
         printf("%s DEBUG: Ricevuto CLIENT_CREATEMATCH da player_id=%d\n", MSG_DEBUG, player_id);
         
+        // controllo se il numero massimo delle paritte corrisponde 
         if(curr_matches_size < MAX_MATCHES) {
             Match *new_match = malloc(sizeof(Match));
             new_match->participants[0] = player;
@@ -190,25 +275,24 @@ void handle_packet(Client *client, Packet *packet) {
             free(error);
         }
     }
-    
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
- // ===== JOIN MATCH =====
+    /*
+     * ═══════════════════════════════════════════════════════════════════════
+     *                        3. JOIN MATCH HANDLER
+     * ═══════════════════════════════════════════════════════════════════════
+     * Gestisce le richieste di un player di unirsi a una partita esistente.
+     * Validazioni effettuate:
+     * - La partita deve esistere
+     * - Il player non deve essere già occupato (busy=0)
+     * - Il player non può entrare nella propria partita
+     * - La partita non deve essere già iniziata (busy del proprietario=0)
+     *
+     * Se valido:
+     * - Aggiunge il player alla coda delle richieste (RequestQueue)
+     * - Invia SERVER_SUCCESS al richiedente
+     * - Notifica il proprietario con SERVER_MATCHREQUEST (se primo in coda)
+     * ───────────────────────────────────────────────────────────────────────
+     */
     if(packet->id == CLIENT_JOINMATCH) {
         printf("%s DEBUG: Ricevuto CLIENT_JOINMATCH da player_id=%d\n", MSG_DEBUG, player_id);
         if(serialized != NULL) {
@@ -248,7 +332,9 @@ void handle_packet(Client *client, Packet *packet) {
                                 Packet *req_packet = malloc(sizeof(Packet));
                                 req_packet->id = SERVER_MATCHREQUEST;
                                 req_packet->content = request;
+                                 
 
+                                // qui cosa fa ????????????????????????????'
                                 int owner_fd = get_socket_by_player_id(found_match->participants[0]->id);
                                 if(owner_fd != -1) {
                                     send_packet(owner_fd, req_packet);
@@ -302,9 +388,25 @@ void handle_packet(Client *client, Packet *packet) {
         }
     }
 
-
-
-// ===== MODIFY REQUEST (Accept/Reject) =====
+    /*
+     * ═══════════════════════════════════════════════════════════════════════
+     *                    4. MODIFY REQUEST HANDLER (Accept/Reject)
+     * ═══════════════════════════════════════════════════════════════════════
+     * Gestisce la risposta del proprietario alle richieste di join.
+     * Solo il proprietario della partita può accettare/rifiutare.
+     *
+     * Se ACCETTATO (_packet->accepted = 1):
+     * - Aggiunge il richiedente come secondo giocatore
+     * - Imposta busy=1 per entrambi i giocatori
+     * - Cambia stato partita a STATE_TURN_PLAYER1
+     * - Rifiuta automaticamente tutti gli altri in coda
+     * - Notifica entrambi i giocatori con SERVER_NOTICESTATE
+     *
+     * Se RIFIUTATO (_packet->accepted = 0):
+     * - Rimuove il richiedente dalla coda
+     * - Notifica il prossimo in coda al proprietario (se presente)
+     * ───────────────────────────────────────────────────────────────────────
+     */
     if(packet->id == CLIENT_MODIFYREQUEST) {
         if(serialized != NULL) {
             Client_ModifyRequest *_packet = (Client_ModifyRequest *)serialized;
@@ -441,10 +543,27 @@ void handle_packet(Client *client, Packet *packet) {
         }
     }
 
-
-
-
-    // ===== MAKE MOVE =====
+    /*
+     * ═══════════════════════════════════════════════════════════════════════
+     *                         5. MAKE MOVE HANDLER
+     * ═══════════════════════════════════════════════════════════════════════
+     * Gestisce l'esecuzione di una mossa durante la partita.
+     *
+     * Validazioni:
+     * - Il player deve essere partecipante della partita
+     * - Deve essere il turno del player (STATE_TURN_PLAYER1 o PLAYER2)
+     * - Coordinate devono essere valide (0-2)
+     * - La casella deve essere vuota
+     *
+     * Dopo la mossa:
+     * - Aggiorna la griglia con 'X' (Player1) o 'O' (Player2)
+     * - Notifica entrambi i giocatori con SERVER_NOTICEMOVE
+     * - Controlla vittoria con check_winner()
+     * - Controlla pareggio con is_board_full()
+     * - Se partita continua, cambia turno e notifica con SERVER_NOTICESTATE
+     * - Se vittoria/pareggio, chiama end_match()
+     * ───────────────────────────────────────────────────────────────────────
+     */
     if(packet->id == CLIENT_MAKEMOVE) {
         if(serialized != NULL) {
             Client_MakeMove *_packet = (Client_MakeMove *)serialized;
@@ -555,8 +674,31 @@ void handle_packet(Client *client, Packet *packet) {
         }
     }
 
-
-    // ===== PLAY AGAIN =====
+    /*
+     * ═══════════════════════════════════════════════════════════════════════
+     *                        6. PLAY AGAIN HANDLER
+     * ═══════════════════════════════════════════════════════════════════════
+     * Gestisce la richiesta di rivincita dopo la fine di una partita.
+     * Funziona solo se la partita è in stato STATE_TERMINATED.
+     *
+     * Due scenari:
+     *
+     * A) choice = 1 (VUOLE GIOCARE ANCORA):
+     *    - Registra il player come "pronto" (play_again[index])
+     *    - Incrementa play_again_counter
+     *    - Se ENTRAMBI i player hanno detto sì:
+     *      → Reset completo della griglia
+     *      → Stato torna a STATE_TURN_PLAYER1
+     *      → Notifica entrambi con SERVER_NOTICESTATE
+     *    - Se solo UNO ha detto sì:
+     *      → Invia SERVER_SUCCESS e attende l'altro
+     *
+     * B) choice = 0 (NON VUOLE GIOCARE):
+     *    - Reset del counter
+     *    - Notifica l'altro player con STATE_TERMINATED
+     *    - Rimuove definitivamente la partita
+     * ───────────────────────────────────────────────────────────────────────
+     */
     if(packet->id == CLIENT_PLAYAGAIN) {
         if(serialized != NULL) {
             Client_PlayAgain *_packet = (Client_PlayAgain *)serialized;
@@ -681,8 +823,23 @@ void handle_packet(Client *client, Packet *packet) {
         }
     }
 
-
-    // ===== QUIT MATCH =====
+    /*
+     * ═══════════════════════════════════════════════════════════════════════
+     *                        7. QUIT MATCH HANDLER
+     * ═══════════════════════════════════════════════════════════════════════
+     * Gestisce l'abbandono di una partita da parte di un giocatore.
+     *
+     * Comportamento:
+     * - Identifica quale player sta abbandonando (0 o 1)
+     * - Trova l'altro giocatore nella partita
+     * - Notifica l'altro giocatore con STATE_WIN (vince per abbandono)
+     * - Reset dei flag busy di entrambi i giocatori
+     * - Rimuove definitivamente la partita dal server
+     *
+     * Nota: Questo è diverso da una disconnessione improvvisa (gestita
+     *       da joiner_thread). Qui il player abbandona volontariamente.
+     * ───────────────────────────────────────────────────────────────────────
+     */
     if(packet->id == CLIENT_QUITMATCH) {
         if(serialized != NULL) {
             Client_QuitMatch *_packet = (Client_QuitMatch *)serialized;
@@ -751,13 +908,52 @@ void handle_packet(Client *client, Packet *packet) {
         }
     }
 
+    /*
+     * ───────────────────────────────────────────────────────────────────────
+     * CLEANUP: Libera la memoria del pacchetto serializzato
+     * ───────────────────────────────────────────────────────────────────────
+     */
     if(serialized != NULL) {
         free(serialized);
     }
 }
 
-// ===== GAME LOGIC HELPERS =====
+/*
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║                        GAME LOGIC HELPERS                              ║
+ * ║                                                                        ║
+ * ║  Funzioni ausiliarie per la logica di gioco del Tris                  ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ */
 
+
+
+
+
+
+
+
+
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * check_winner - Controlla se c'è un vincitore nella partita
+ * ─────────────────────────────────────────────────────────────────────────
+ * Parametri:
+ *   match - Puntatore alla partita da controllare
+ *
+ * Ritorna:
+ *   0  - Player1 ('X') ha vinto
+ *   1  - Player2 ('O') ha vinto
+ *   -1 - Nessun vincitore (partita continua o pareggio)
+ *
+ * Logica:
+ *   Controlla tutte le combinazioni vincenti:
+ *   - 3 righe orizzontali
+ *   - 3 colonne verticali
+ *   - 2 diagonali (\ e /)
+ * ─────────────────────────────────────────────────────────────────────────
+ */
 int check_winner(Match *match) {
     char grid[3][3];
     memcpy(grid, match->grid, sizeof(grid));
@@ -789,10 +985,53 @@ int check_winner(Match *match) {
     return -1; // Nessun vincitore
 }
 
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * is_board_full - Verifica se la griglia è completamente piena (pareggio)
+ * ─────────────────────────────────────────────────────────────────────────
+ * Parametri:
+ *   match - Puntatore alla partita da controllare
+ *
+ * Ritorna:
+ *   1 - La griglia è piena (tutte le 9 caselle occupate)
+ *   0 - Ci sono ancora caselle vuote
+ *
+ * Nota: Usa il campo free_slots che viene decrementato ad ogni mossa
+ * ─────────────────────────────────────────────────────────────────────────
+ */
 int is_board_full(Match *match) {
     return match->free_slots == 0;
 }
 
+
+
+
+
+
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────
+ * end_match - Termina una partita e notifica i giocatori del risultato
+ * ─────────────────────────────────────────────────────────────────────────
+ * Parametri:
+ *   match         - Puntatore alla partita da terminare
+ *   winner_index  - Indice del vincitore:
+ *                   0  = Player1 vince
+ *                   1  = Player2 vince
+ *                   -1 = Pareggio
+ *
+ * Comportamento:
+ *   - Reset dei flag busy di entrambi i giocatori
+ *   - Invio notifiche differenziate ai giocatori:
+ *     → Vincitore riceve STATE_WIN
+ *     → Perdente riceve STATE_LOSE
+ *     → Entrambi ricevono STATE_DRAW in caso di pareggio
+ *   - Imposta lo stato della partita a STATE_TERMINATED
+ *
+ * Nota: Dopo questa funzione, la partita rimane in memoria per permettere
+ *       ai giocatori di richiedere una rivincita (PLAY_AGAIN)
+ * ─────────────────────────────────────────────────────────────────────────
+ */
 void end_match(Match *match, int winner_index) {
     // winner_index: 0=player1 vince, 1=player2 vince, -1=pareggio
 
@@ -848,6 +1087,39 @@ void end_match(Match *match, int winner_index) {
     match->state = STATE_TERMINATED;
 }
 
+
+
+
+
+
+
+
+
+/*
+ * ╔════════════════════════════════════════════════════════════════════════╗
+ * ║                       SERVER_THREAD - Main Loop                        ║
+ * ║                                                                        ║
+ * ║  Thread principale per la gestione della comunicazione con un client  ║
+ * ╚════════════════════════════════════════════════════════════════════════╝
+ *
+ * Parametri:
+ *   args - Puntatore a Client struct
+ *
+ * Funzionamento:
+ *   1. Loop infinito di ricezione dati dal socket
+ *   2. recv() blocca fino a quando arrivano dati
+ *   3. Se recv() ritorna <= 0 → client disconnesso, esci dal loop
+ *   4. Parse dei pacchetti ricevuti:
+ *      - Byte 0: packet ID (tipo di pacchetto)
+ *      - Byte 1-2: size (dimensione content, little-endian)
+ *      - Byte 3+: content (dati del pacchetto)
+ *   5. Per ogni pacchetto nel buffer, chiama handle_packet()
+ *   6. Libera memoria dei pacchetti processati
+ *
+ * Note:
+ *   - Supporta più pacchetti in un singolo recv()
+ *   - Quando questo thread termina, joiner_thread fa il cleanup
+ */
 void *server_thread(void *args) {
     Client *client = (Client *)args;
     char buffer[BUFFER_SIZE];

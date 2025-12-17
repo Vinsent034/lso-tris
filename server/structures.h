@@ -7,15 +7,15 @@
 #include <pthread.h>
 
 typedef struct {
-    int conn;
-    struct sockaddr_in addr;
-    Player *player;
+    int conn; //serve a indicare la scoket per comuncare col client
+    struct sockaddr_in addr; // indirizzo di rete del client (IP + porta)
+    Player *player; // un puntatore al gicocatore assciato a questo client
 } Client;
 
 typedef struct ClientNode {
     Client *val;
     struct ClientNode *next;
-} ClientNode;
+} ClientNode; // E una struttura che tuebe traccia di tutti i cllienti conessi al server, fatta come lista
 
 extern ClientNode *clients;
 extern short curr_clients_size;

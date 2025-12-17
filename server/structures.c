@@ -10,19 +10,31 @@ short curr_clients_size = 0;
 pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t matches_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void broadcast_packet(ClientNode *head, Packet *packet, int except) {
-    pthread_mutex_lock(&clients_mutex);
+
+
+//invia un pachetti escluso una socket
+void broadcast_packet(ClientNode *head, Packet *packet, int except) {  //except e la socket da escludere
+    pthread_mutex_lock(&clients_mutex); // blocco il mutex per i clients
     ClientNode *current = head;
     while(current != NULL) {
-        if(current->val->conn != except) {
-            send_packet(current->val->conn, packet);
+        if(current->val->conn != except) { // invio a tutti tranne che a quello da escludere
+            send_packet(current->val->conn, packet);// invio il pacchetto
         }
         current = current->next;
     }
     pthread_mutex_unlock(&clients_mutex);
 }
 
-int get_socket_by_player_id(int player_id) {
+
+
+
+
+
+
+
+
+//funzione che restitutisce la socket di un giocatore preso il suo id
+int get_socket_by_player_id(int player_id) { 
     pthread_mutex_lock(&clients_mutex);
     ClientNode *current = clients;
     int result = -1;
@@ -36,6 +48,13 @@ int get_socket_by_player_id(int player_id) {
     pthread_mutex_unlock(&clients_mutex);
     return result;
 }
+
+
+
+
+
+
+
 
 void remove_client_from_list(Client *client) {
     pthread_mutex_lock(&clients_mutex);
@@ -60,6 +79,16 @@ void remove_client_from_list(Client *client) {
     pthread_mutex_unlock(&clients_mutex);
 }
 
+
+
+
+
+
+
+
+
+
+
 // Thread-safe wrappers per operazioni su matches
 void safe_add_match(Match *match) {
     pthread_mutex_lock(&matches_mutex);
@@ -67,12 +96,14 @@ void safe_add_match(Match *match) {
     pthread_mutex_unlock(&matches_mutex);
 }
 
+
+// Thread-safe wrappers per operazioni su matches
 void safe_remove_match(Match *match) {
     pthread_mutex_lock(&matches_mutex);
     remove_match(match);
     pthread_mutex_unlock(&matches_mutex);
 }
-
+// Thread-safe wrappers per operazioni su matches
 Match *safe_get_match_by_id(int id) {
     pthread_mutex_lock(&matches_mutex);
     Match *result = get_match_by_id(matches, id);
