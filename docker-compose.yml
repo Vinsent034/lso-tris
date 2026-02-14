@@ -1,0 +1,34 @@
+services:
+  # Server LSO-TRIS
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: lso-tris-server
+    ports:
+      - "5555:5555"
+    networks:
+      - tris-network
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+  # Client LSO-TRIS (puoi avviarne quanti ne vuoi)
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    depends_on:
+      - server
+    networks:
+      - tris-network
+    stdin_open: true
+    tty: true
+    init: true
+    environment:
+      - SERVER_HOST=server
+      - SERVER_PORT=5555
+
+networks:
+  tris-network:
+    driver: bridge

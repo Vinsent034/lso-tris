@@ -7,7 +7,13 @@
 #include <stdlib.h>
 
 void send_packet(int sockfd, Packet *packet) {
-    char serialized[65536 + 3];
+    // Validazione parametri
+    if(packet == NULL) {
+        fprintf(stderr, "%s send_packet: packet è NULL\n", MSG_ERROR);
+        return;
+    }
+
+    char serialized[65536 + 3]; // 65536 sono 2 byte , i 3 sono byte per header , codifica litle endian, byte 0 contine packet -> Id, 1 e 2 dimensioni in litle endian
     serialized[0] = packet->id;
     
     // ===== SERVER PACKETS =====
@@ -88,10 +94,24 @@ void send_packet(int sockfd, Packet *packet) {
     // Little endian size
     serialized[1] = packet->size & 0xFF;
     serialized[2] = (packet->size >> 8) & 0xFF;
-    
-    if(send(sockfd, serialized, packet->size + 3, 0) < 1) {
-        fprintf(stderr, "%s Errore invio pacchetto (fd=%d, id=%d): %s\n", 
-                MSG_ERROR, sockfd, packet->id, strerror(errno));
+
+    // Invio con gestione di send() parziale
+    size_t total_bytes = packet->size + 3;
+    size_t sent = 0;
+
+    while(sent < total_bytes) {
+        ssize_t n = send(sockfd, serialized + sent, total_bytes - sent, 0);
+        if(n < 0) {
+            fprintf(stderr, "%s Errore invio pacchetto (fd=%d, id=%d): %s\n",
+                    MSG_ERROR, sockfd, packet->id, strerror(errno));
+            return;
+        }
+        if(n == 0) {
+            fprintf(stderr, "%s Connessione chiusa durante invio (fd=%d)\n",
+                    MSG_ERROR, sockfd);
+            return;
+        }
+        sent += n;
     }
 }
 
@@ -105,8 +125,15 @@ void send_packet(int sockfd, Packet *packet) {
 
 
 
+// prende un pachetto e converte i byte ricevuti dalla rete in una struttura C allocata in memoria 
+//in base all'id  alloca la struttyra e copia i byte nei campi giusti 
+// ritorna un puntatore void alla struttura deserializzata
 
 void *serialize_packet(Packet *packet) {
+    // Validazione generale: packet non NULL e content non NULL per pacchetti con size > 0
+    if(packet == NULL) return NULL;
+    if(packet->size > 0 && packet->content == NULL) return NULL;
+
     // ===== CLIENT PACKETS =====
     if(packet->id == CLIENT_JOINMATCH) {
         if(packet->size < 1) return NULL;

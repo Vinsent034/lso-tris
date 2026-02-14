@@ -21,4 +21,27 @@ test_compile:
 	@make all
 	@echo "✓ Compilation successful!"
 
-.PHONY: all clean test_compile
+# Docker targets
+docker-build:
+	@echo "Building Docker images..."
+	docker-compose build
+
+docker-up:
+	@echo "Starting Docker containers..."
+	docker-compose up
+
+docker-down:
+	@echo "Stopping Docker containers..."
+	docker-compose down
+
+docker-clean:
+	@echo "Removing Docker images and containers..."
+	docker-compose down --rmi all --volumes
+
+docker-rebuild:
+	@echo "Rebuilding Docker images..."
+	docker-compose down
+	docker-compose build --no-cache
+	docker-compose up
+
+.PHONY: all client server clean test_compile docker-build docker-up docker-down docker-clean docker-rebuild

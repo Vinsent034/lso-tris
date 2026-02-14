@@ -5,7 +5,7 @@
 MatchList *matches = NULL;
 short curr_matches_size = 0;
 
-void add_match(Match *match) {
+void add_match(Match *match) { // aggiunge una partita alla lista , inserimento in testa 
     MatchList *new_node = malloc(sizeof(MatchList));
     new_node->val = match;
     new_node->next = matches;
@@ -13,7 +13,7 @@ void add_match(Match *match) {
     curr_matches_size++;
 }
 
-void remove_match(Match *match) {
+void remove_match(Match *match) { // elimina un partita dalla lista , rimozione di tipo n position
     MatchList *curr = matches;
     MatchList *prev = NULL;
     
@@ -44,7 +44,7 @@ Match *get_match_by_id(MatchList *head, int id) {
     return NULL;
 }
 
-int find_free_id() {
+int find_free_id() { // trova una partita che non e occupato
     for(int id = 0; id < MAX_MATCHES; id++) {
         int found = 0;
         MatchList *curr = matches;
@@ -60,7 +60,7 @@ int find_free_id() {
     return -1;
 }
 
-void add_requester(Match *match, RequestNode *node) {
+void add_requester(Match *match, RequestNode *node) { // funzione che serve per effettuare una richiesta alla partita
     node->next = NULL;
     if(match->requests_tail == NULL) {
         match->requests_head = node;

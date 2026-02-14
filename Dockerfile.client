@@ -1,0 +1,38 @@
+# Dockerfile per il Client LSO-TRIS
+FROM gcc:13 AS builder
+
+# Installa dipendenze necessarie
+RUN apt-get update && apt-get install -y \
+    make \
+    && rm -rf /var/lib/apt/lists/*
+
+# Imposta la working directory
+WORKDIR /app
+
+# Copia i file sorgente
+COPY common/ ./common/
+COPY client/ ./client/
+COPY Makefile .
+
+# Compila il client (forza rebuild completo)
+RUN make -B client
+
+# Stage finale - immagine più leggera
+FROM debian:bookworm-slim
+
+# Installa solo le librerie runtime necessarie
+RUN apt-get update && apt-get install -y \
+    libpthread-stubs0-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copia solo l'eseguibile compilato
+COPY --from=builder /app/run_client .
+
+# Copia lo script di entrypoint
+COPY docker-entrypoint.sh .
+RUN chmod +x docker-entrypoint.sh
+
+# Avvia il client (con modalità interattiva)
+ENTRYPOINT ["./docker-entrypoint.sh"]

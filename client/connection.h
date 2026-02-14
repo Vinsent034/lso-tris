@@ -5,7 +5,7 @@
 
 extern int player_id;
 
-void handle_packet(int sockfd, Packet *packet);
+void handle_packet(int sockfd, Packet *packet); //
 void create_match(int sockfd);
 void join_match(int sockfd, int match_id);
 void make_move(int sockfd, int match_id, int x, int y);
@@ -22,6 +22,7 @@ extern int match_ended;
 extern int am_i_player1;  // 1 se sono Player1 (X), 0 se sono Player2 (O)
 extern int my_turn_flag;  // 1 quando è il mio turno e devo giocare
 extern int clear_stdin_flag;  // 1 se dobbiamo pulire stdin prima di leggere
+extern int show_menu_flag;    // 1 quando il menu deve essere ristampato
 
 // Pending match request
 extern int pending_request_player;

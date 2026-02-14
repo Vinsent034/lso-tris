@@ -7,13 +7,13 @@
 #include <pthread.h>
 
 typedef struct {
-    int conn;
-    struct sockaddr_in addr;
+    int conn; // file relativo alla socket (connessione della sua rete)
+    struct sockaddr_in addr; // indireizzo del cliente (IP)
     Player *player;
 } Client;
 
 typedef struct ClientNode {
-    Client *val;
+    Client *val; 
     struct ClientNode *next;
 } ClientNode;
 
@@ -24,11 +24,11 @@ extern short curr_clients_size;
 extern pthread_mutex_t clients_mutex;
 extern pthread_mutex_t matches_mutex;
 
-void broadcast_packet(ClientNode *head, Packet *packet, int except);
-int get_socket_by_player_id(int player_id);
-void remove_client_from_list(Client *client);
+void broadcast_packet(ClientNode *head, Packet *packet, int except); // invia un pachetto a tutti i nodi
+int get_socket_by_player_id(int player_id); // ricerca una socked di un player con id specifico
+void remove_client_from_list(Client *client); //rimoszione di un cliente dalla lista
 
-// Thread-safe wrappers per operazioni su matches
+// Funzioni che usano un mutex per fare in modo che le aggiunte e rimozioni non danno problemi
 void safe_add_match(Match *match);
 void safe_remove_match(Match *match);
 Match *safe_get_match_by_id(int id);

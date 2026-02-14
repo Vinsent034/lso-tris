@@ -1,0 +1,19 @@
+# Ignora file non necessari per il build Docker
+.git
+.gitignore
+*.md
+README.md
+
+# Ignora eseguibili già compilati
+run_server
+run_client
+*.o
+*.out
+
+# Ignora file temporanei
+*.swp
+.swp
+*~
+
+# Ignora file di log
+*.log
