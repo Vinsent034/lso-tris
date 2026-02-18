@@ -21,40 +21,40 @@
 #define STATE_DRAW          8
 
 typedef struct {
-    int id;
-    int busy;
+    int id;                        // ID univoco assegnato dal server
+    int busy;                      // 1 = impegnato in partita, 0 = libero
 } Player;
 
 typedef struct RequestNode {
-    Player *requester;
-    struct RequestNode *next;
+    Player *requester;             // Player che ha fatto richiesta di join
+    struct RequestNode *next;      // Puntatore al prossimo in coda
 } RequestNode;
 
 typedef struct {
-    Player *participants[2];
-    RequestNode *requests_head;
-    RequestNode *requests_tail;
-    char grid[3][3];
-    int free_slots;
-    int state;
-    int play_again_counter;
-    Player *play_again[2];
-    int id;
+    Player *participants[2];       // [0]=Player1(X), [1]=Player2(O)
+    RequestNode *requests_head;    // Testa della coda FIFO richieste
+    RequestNode *requests_tail;    // Coda della coda FIFO richieste
+    char grid[3][3];               // Griglia di gioco (0=libera, 'X', 'O')
+    int free_slots;                // Celle libere (inizia a 9)
+    int state;                     // Stato corrente (STATE_*)
+    int play_again_counter;        // Quanti player vogliono rigiocare
+    Player *play_again[2];         // Giocatori che vogliono rigiocare
+    int id;                        // ID univoco della partita
 } Match;
 
 typedef struct MatchList {
-    Match *val;
-    struct MatchList *next;
+    Match *val;                    // Puntatore alla partita
+    struct MatchList *next;        // Prossimo nodo della lista
 } MatchList;
 
-extern MatchList *matches;
-extern short curr_matches_size;
+extern MatchList *matches;         // Lista globale delle partite
+extern short curr_matches_size;    // Numero attuale di partite
 
-void add_match(Match *match);
-void remove_match(Match *match);
-Match *get_match_by_id(MatchList *head, int id);
-int find_free_id();
-void add_requester(Match *match, RequestNode *node);
-void delete_from_head(Match *match);
+void add_match(Match *match);                          // Aggiunge una partita alla lista
+void remove_match(Match *match);                       // Rimuove una partita dalla lista
+Match *get_match_by_id(MatchList *head, int id);       // Cerca partita per ID
+int find_free_id();                                    // Trova un ID libero
+void add_requester(Match *match, RequestNode *node);   // Aggiunge richiesta di join
+void delete_from_head(Match *match);                   // Rimuove la prima richiesta dalla coda
 
 #endif

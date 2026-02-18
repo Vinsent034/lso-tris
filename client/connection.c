@@ -160,21 +160,27 @@ static void handle_turn_state(int state, int match_id) {
 }
 
 static void handle_win_state(int match_id) {
-    printf("\n%s HAI VINTO! Partita #%d\n", MSG_INFO, match_id);
+    printf("\n%s Partita #%d - Risultato finale:\n", MSG_INFO, match_id);
+    display_grid();
+    printf("\n%s HAI VINTO!\n", MSG_INFO);
     printf("=========================\n");
     match_ended = 1;
     my_turn_flag = 0;
 }
 
 static void handle_lose_state(int match_id) {
-    printf("\n%s Hai perso. Partita #%d\n", MSG_ERROR, match_id);
+    printf("\n%s Partita #%d - Risultato finale:\n", MSG_INFO, match_id);
+    display_grid();
+    printf("\n%s Hai perso.\n", MSG_ERROR);
     printf("=========================\n");
     match_ended = 1;
     my_turn_flag = 0;
 }
 
 static void handle_draw_state(int match_id) {
-    printf("\n%s PAREGGIO! Partita #%d\n", MSG_INFO, match_id);
+    printf("\n%s Partita #%d - Risultato finale:\n", MSG_INFO, match_id);
+    display_grid();
+    printf("\n%s PAREGGIO!\n", MSG_INFO);
     printf("=========================\n");
     match_ended = 1;
     my_turn_flag = 0;

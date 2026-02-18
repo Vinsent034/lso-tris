@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -pthread -g
 COMMON_SRC = common/models.c common/protocol.c
-CLIENT_SRC = client/client.c client/gui.c client/connection.c
+CLIENT_SRC = client/client.c client/connection.c
 SERVER_SRC = server/server.c server/structures.c server/connection.c
 
 all: client server

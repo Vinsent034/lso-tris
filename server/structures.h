@@ -7,30 +7,30 @@
 #include <pthread.h>
 
 typedef struct {
-    int conn; // file relativo alla socket (connessione della sua rete)
-    struct sockaddr_in addr; // indireizzo del cliente (IP)
-    Player *player;
+    int conn;                      // File descriptor della socket TCP
+    struct sockaddr_in addr;       // Indirizzo IP del client
+    Player *player;                // Puntatore al Player associato
 } Client;
 
 typedef struct ClientNode {
-    Client *val; 
-    struct ClientNode *next;
+    Client *val;                   // Dati del client
+    struct ClientNode *next;       // Prossimo nodo della lista
 } ClientNode;
 
-extern ClientNode *clients;
-extern short curr_clients_size;
+extern ClientNode *clients;        // Lista globale dei client connessi
+extern short curr_clients_size;    // Numero attuale di client connessi
 
-// Mutex per thread safety
-extern pthread_mutex_t clients_mutex;
-extern pthread_mutex_t matches_mutex;
+// Mutex globali (structures.c)
+extern pthread_mutex_t clients_mutex;  // Mutex per accesso alla lista client
+extern pthread_mutex_t matches_mutex;  // Mutex per accesso alla lista partite
 
-void broadcast_packet(ClientNode *head, Packet *packet, int except); // invia un pachetto a tutti i nodi
-int get_socket_by_player_id(int player_id); // ricerca una socked di un player con id specifico
-void remove_client_from_list(Client *client); //rimoszione di un cliente dalla lista
+void broadcast_packet(ClientNode *head, Packet *packet, int except); // Invia un pacchetto a tutti i client
+int get_socket_by_player_id(int player_id);                          // Cerca la socket di un player per ID
+void remove_client_from_list(Client *client);                        // Rimuove un client dalla lista
 
-// Funzioni che usano un mutex per fare in modo che le aggiunte e rimozioni non danno problemi
-void safe_add_match(Match *match);
-void safe_remove_match(Match *match);
-Match *safe_get_match_by_id(int id);
+// Funzioni thread-safe per gestione partite (usano matches_mutex)
+void safe_add_match(Match *match);         // Aggiunge una partita in modo thread-safe
+void safe_remove_match(Match *match);      // Rimuove una partita in modo thread-safe
+Match *safe_get_match_by_id(int id);       // Cerca una partita per ID in modo thread-safe
 
 #endif

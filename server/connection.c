@@ -10,16 +10,35 @@
 
 #define BUFFER_SIZE 1024
 
-// Counter atomico per generare player_id univoci
+// Mutex per generare player_id univoci
 static pthread_mutex_t player_id_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int next_player_id = 1;
 
-// Funzione per ottenere un player_id univoco
+// Funzione per ottenere un player_id univoco, riutilizzando gli ID liberi
 static int get_unique_player_id() {
     pthread_mutex_lock(&player_id_mutex);
-    int id = next_player_id++;
+    pthread_mutex_lock(&clients_mutex);
+
+    // Cerca il primo ID libero a partire da 1
+    for(int candidate = 1; candidate <= MAX_CLIENTS; candidate++) {
+        int in_use = 0;
+        ClientNode *current = clients;
+        while(current != NULL) {
+            if(current->val->player != NULL && current->val->player->id == candidate) {
+                in_use = 1;
+                break;
+            }
+            current = current->next;
+        }
+        if(!in_use) {
+            pthread_mutex_unlock(&clients_mutex);
+            pthread_mutex_unlock(&player_id_mutex);
+            return candidate;
+        }
+    }
+
+    pthread_mutex_unlock(&clients_mutex);
     pthread_mutex_unlock(&player_id_mutex);
-    return id;
+    return -1; // Nessun ID disponibile
 }
 
 void *joiner_thread(void *args) {
@@ -951,32 +970,21 @@ void handle_packet(Client *client, Packet *packet) {
 // ===== GAME LOGIC HELPERS ===== Funzioni di supporto per controllare vittoria, pareggio e terminare partite
 
 int check_winner(Match *match) {
-    char grid[3][3];
-    memcpy(grid, match->grid, sizeof(grid));
+    char (*g)[3] = match->grid; // Accesso diretto alla griglia, senza copia
 
-    // Controlla righe
+    // Controlla righe e colonne in un unico ciclo
     for(int i = 0; i < 3; i++) {
-        if(grid[i][0] != 0 && grid[i][0] == grid[i][1] && grid[i][1] == grid[i][2]) {
-            return (grid[i][0] == 'X') ? 0 : 1;
-        }
+        if(g[i][0] != 0 && g[i][0] == g[i][1] && g[i][1] == g[i][2])
+            return (g[i][0] == 'X') ? 0 : 1;
+        if(g[0][i] != 0 && g[0][i] == g[1][i] && g[1][i] == g[2][i])
+            return (g[0][i] == 'X') ? 0 : 1;
     }
 
-    // Controlla colonne
-    for(int j = 0; j < 3; j++) {
-        if(grid[0][j] != 0 && grid[0][j] == grid[1][j] && grid[1][j] == grid[2][j]) {
-            return (grid[0][j] == 'X') ? 0 : 1;
-        }
-    }
-
-    // Controlla diagonale principale (\)
-    if(grid[0][0] != 0 && grid[0][0] == grid[1][1] && grid[1][1] == grid[2][2]) {
-        return (grid[0][0] == 'X') ? 0 : 1;
-    }
-
-    // Controlla diagonale secondaria (/)
-    if(grid[0][2] != 0 && grid[0][2] == grid[1][1] && grid[1][1] == grid[2][0]) {
-        return (grid[0][2] == 'X') ? 0 : 1;
-    }
+    // Controlla diagonale principale (\) e secondaria (/)
+    if(g[0][0] != 0 && g[0][0] == g[1][1] && g[1][1] == g[2][2])
+        return (g[0][0] == 'X') ? 0 : 1;
+    if(g[0][2] != 0 && g[0][2] == g[1][1] && g[1][1] == g[2][0])
+        return (g[0][2] == 'X') ? 0 : 1;
 
     return -1; // Nessun vincitore
 }
