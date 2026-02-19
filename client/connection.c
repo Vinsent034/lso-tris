@@ -56,7 +56,7 @@ static void handle_handshake(void *serialized) {
 }
 
 static void handle_success() {
-    printf("%s Operazione completata con successo\n", MSG_INFO);
+    printf("\n%s Operazione completata con successo\n", MSG_INFO);
 }
 
 static void handle_error() {
@@ -126,8 +126,16 @@ static void handle_broadcast_match(void *serialized) {
     if(serialized == NULL) return;
 
     Server_BroadcastMatch *bc = (Server_BroadcastMatch *)serialized;
-    printf("%s Nuova partita disponibile: #%d (creata da player #%d)\n",
-           MSG_INFO, bc->match, bc->player_id);
+
+    if(bc->player_id == -1) {
+        // Convenzione: player_id=-1 indica che la partita è terminata
+        // Ignora se siamo noi i partecipanti (già gestito da SERVER_NOTICESTATE)
+        if(current_match_id == bc->match) return;
+        printf("%s Partita #%d è terminata\n", MSG_INFO, bc->match);
+    } else {
+        printf("\n%s Nuova partita disponibile: #%d (creata da player #%d)\n",
+               MSG_INFO, bc->match, bc->player_id);
+    }
 }
 
 static void handle_turn_state(int state, int match_id) {

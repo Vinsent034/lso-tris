@@ -1052,6 +1052,20 @@ void end_match(Match *match, int winner_index) {
 
     // Imposta stato terminato
     match->state = STATE_TERMINATED;
+
+    // Broadcast a tutti gli altri client: la partita è terminata
+    Server_BroadcastMatch *bc = malloc(sizeof(Server_BroadcastMatch));
+    bc->match = match->id;
+    bc->player_id = -1; // Convenzione: -1 indica partita terminata (non nuova partita)
+
+    Packet *bc_packet = malloc(sizeof(Packet));
+    bc_packet->id = SERVER_BROADCASTMATCH;
+    bc_packet->content = bc;
+
+    broadcast_packet(clients, bc_packet, -1);
+
+    free(bc_packet);
+    free(bc);
 }
 
 void *server_thread(void *args) {

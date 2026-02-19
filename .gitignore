@@ -28,3 +28,13 @@ core.*
 # Temporanei
 *.log
 *.tmp
+
+# Docker
+Dockerfile.client
+Dockerfile.server
+docker-compose.yml
+docker-client.sh
+docker-entrypoint.sh
+docker-start.sh
+.dockerignore
+DOCKER.md
