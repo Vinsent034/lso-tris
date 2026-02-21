@@ -71,6 +71,7 @@ int pending_request_player = -1;
 int pending_request_match = -1;
 int show_menu_flag = 0;
 int in_waiting_room = 0;
+int i_won = 0; // 1 se abbiamo vinto l'ultima partita (per gestire opzione 6 del vincitore)
 
 // ========== FUNZIONI DI UTILITÀ ==========
 
@@ -94,6 +95,7 @@ static void reset_match_state() {
     my_turn_flag = 0;
     am_i_player1 = -1;
     in_waiting_room = 0;
+    i_won = 0;
     memset(client_grid, 0, sizeof(client_grid));
     available_matches = NULL;
 }
@@ -237,11 +239,11 @@ static void handle_turn_state(int state, int match_id) {
 static void handle_win_state(int match_id) {
     printf("\n%s Partita #%d - Risultato finale:\n", MSG_INFO, match_id);
     display_grid();
-    printf("\n%s HAI VINTO!\n", MSG_INFO);
+    printf("\n%s HAI VINTO! Usa l'opzione 6 per riaprire la partita o 1 per crearne una nuova.\n", MSG_INFO);
     printf("=========================\n");
-    // Non settiamo match_ended=1: il vincitore entra in waiting room
-    // tramite il SERVER_NOTICESTATE con STATE_WAITING che arriva dal server
+    match_ended = 1;
     my_turn_flag = 0;
+    i_won = 1;
 }
 
 static void handle_lose_state(int match_id) {
@@ -517,9 +519,22 @@ void play_again(int sockfd, int match_id, int choice) {
     free(play);
 
     if(choice == 1) {
-        printf("%s Richiesta 'Gioca Ancora' inviata. In attesa dell'altro giocatore...\n", MSG_INFO);
+        if(i_won == 1) {
+            // Vincitore vuole riaprire la partita: entra in waiting room come proprietario
+            printf("%s Partita riaperta. Sei il proprietario. In attesa di un nuovo avversario...\n", MSG_INFO);
+            i_won = 0;
+            match_ended = 0;
+            am_i_player1 = 1;
+            in_waiting_room = 1;
+            memset(client_grid, 0, sizeof(client_grid));
+            // current_match_id rimane invariato
+        } else {
+            // Caso pareggio: aspetta che anche l'altro dica sì
+            printf("%s Richiesta 'Gioca Ancora' inviata. In attesa dell'altro giocatore...\n", MSG_INFO);
+        }
     } else {
         printf("%s Hai rifiutato di giocare ancora. Partita terminata.\n", MSG_INFO);
+        i_won = 0;
         reset_match_state();
     }
 }
