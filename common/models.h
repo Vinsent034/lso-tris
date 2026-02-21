@@ -40,6 +40,7 @@ typedef struct {
     int play_again_counter;        // Quanti player vogliono rigiocare
     Player *play_again[2];         // Giocatori che vogliono rigiocare
     int id;                        // ID univoco della partita
+    int winner_index;              // 0=player1 vince, 1=player2 vince, -1=pareggio
 } Match;
 
 typedef struct MatchList {

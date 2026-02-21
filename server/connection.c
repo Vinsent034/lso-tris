@@ -150,6 +150,7 @@ void *joiner_thread(void *args) {
                         match->play_again_counter = 0;
                         match->play_again[0] = NULL;
                         match->play_again[1] = NULL;
+                        match->winner_index = -1;
                         memset(match->grid, 0, sizeof(match->grid));
                         match->free_slots = 9;
 
@@ -254,6 +255,7 @@ static void check_and_leave_terminated_match(int player_id) {
             match->play_again_counter = 0;
             match->play_again[0] = NULL;
             match->play_again[1] = NULL;
+            match->winner_index = -1;
             memset(match->grid, 0, sizeof(match->grid));
             match->free_slots = 9;
             // other rimane busy=0 (era già stato azzerato da end_match)
@@ -349,6 +351,7 @@ void handle_packet(Client *client, Packet *packet) {
             new_match->state = STATE_CREATED;
             new_match->free_slots = 9;
             new_match->play_again_counter = 0;
+            new_match->winner_index = -1;
             new_match->id = find_free_id();
             memset(new_match->grid, 0, sizeof(new_match->grid[0][0]) * 9);
             
@@ -873,7 +876,68 @@ void handle_packet(Client *client, Packet *packet) {
                 }
 
                 if(player_index != -1) {
-                    if(_packet->choice == 1) {
+                    if(found_match->winner_index != -1) {
+                        // ===== CASO VITTORIA: solo il vincitore invia CLIENT_PLAYAGAIN =====
+                        int winner_idx = found_match->winner_index;
+                        // Verifica che sia effettivamente il vincitore a rispondere
+                        if(player_index != winner_idx) {
+                            printf("%s Player id=%d non è il vincitore di Match id=%d\n",
+                                   MSG_WARNING, player_id, _packet->match);
+                            Packet *error = malloc(sizeof(Packet));
+                            error->id = SERVER_ERROR;
+                            error->content = NULL;
+                            send_packet(client->conn, error);
+                            free(error);
+                        } else if(_packet->choice == 1) {
+                            // Vincitore vuole rigiocare: rimette la partita in stato CREATED
+                            printf("%s Vincitore Player id=%d vuole rigiocare Match id=%d\n",
+                                   MSG_INFO, player_id, _packet->match);
+
+                            Player *winner = found_match->participants[winner_idx];
+
+                            // Reset partita con solo il vincitore come player1
+                            memset(found_match->grid, 0, sizeof(found_match->grid));
+                            found_match->free_slots = 9;
+                            found_match->participants[0] = winner;
+                            found_match->participants[1] = NULL;
+                            found_match->state = STATE_CREATED;
+                            found_match->winner_index = -1;
+                            found_match->play_again_counter = 0;
+                            found_match->play_again[0] = NULL;
+                            found_match->play_again[1] = NULL;
+
+                            // Libera il busy del vincitore
+                            winner->busy = 0;
+
+                            // Broadcast della partita riaperta a tutti i client tranne il vincitore
+                            Server_BroadcastMatch *bc = malloc(sizeof(Server_BroadcastMatch));
+                            bc->player_id = winner->id;
+                            bc->match = found_match->id;
+
+                            Packet *bc_packet = malloc(sizeof(Packet));
+                            bc_packet->id = SERVER_BROADCASTMATCH;
+                            bc_packet->content = bc;
+
+                            broadcast_packet(clients, bc_packet, winner->id);
+
+                            free(bc_packet);
+                            free(bc);
+
+                            printf("%s Match id=%d riaperto dal vincitore Player id=%d\n",
+                                   MSG_INFO, found_match->id, winner->id);
+                        } else {
+                            // Vincitore NON vuole rigiocare: rimuove la partita
+                            printf("%s Vincitore Player id=%d NON vuole rigiocare Match id=%d\n",
+                                   MSG_INFO, player_id, _packet->match);
+
+                            Player *winner = found_match->participants[winner_idx];
+                            winner->busy = 0;
+
+                            remove_match(found_match);
+                            printf("%s Match id=%d rimosso definitivamente\n", MSG_INFO, _packet->match);
+                        }
+                    } else if(_packet->choice == 1) {
+                        // ===== CASO PAREGGIO: logica esistente (entrambi devono dire sì) =====
                         // Il player vuole giocare ancora
                         printf("%s Player id=%d vuole giocare ancora Match id=%d\n",
                                MSG_INFO, player_id, _packet->match);
@@ -986,7 +1050,7 @@ void handle_packet(Client *client, Packet *packet) {
                             free(success);
                         }
                     } else {
-                        // Il player NON vuole giocare ancora
+                        // Pareggio: il player NON vuole giocare ancora
                         printf("%s Player id=%d NON vuole giocare ancora Match id=%d\n",
                                MSG_INFO, player_id, _packet->match);
 
@@ -1167,11 +1231,10 @@ void end_match(Match *match, int winner_index) {
            (winner_index == -1) ? "PAREGGIO" :
            (winner_index == 0) ? "Vince Player1" : "Vince Player2");
 
-    // Reset busy flags
-    match->participants[0]->busy = 0;
-    match->participants[1]->busy = 0;
+    // Salva il winner_index nella partita
+    match->winner_index = winner_index;
 
-    // Invia notifiche ai giocatori
+    // Invia notifiche WIN/LOSE/DRAW ai giocatori
     int p0_fd = get_socket_by_player_id(match->participants[0]->id);
     int p1_fd = get_socket_by_player_id(match->participants[1]->id);
 
@@ -1179,15 +1242,19 @@ void end_match(Match *match, int winner_index) {
     Server_NoticeState *state1 = malloc(sizeof(Server_NoticeState));
 
     if(winner_index == -1) {
-        // Pareggio
+        // Pareggio: reset busy per entrambi
+        match->participants[0]->busy = 0;
+        match->participants[1]->busy = 0;
         state0->state = STATE_DRAW;
         state1->state = STATE_DRAW;
     } else if(winner_index == 0) {
-        // Player 0 vince
+        // Player 0 vince: reset busy solo per il perdente (player1)
+        match->participants[1]->busy = 0;
         state0->state = STATE_WIN;
         state1->state = STATE_LOSE;
     } else {
-        // Player 1 vince
+        // Player 1 vince: reset busy solo per il perdente (player0)
+        match->participants[0]->busy = 0;
         state0->state = STATE_LOSE;
         state1->state = STATE_WIN;
     }
@@ -1213,6 +1280,48 @@ void end_match(Match *match, int winner_index) {
 
     // Imposta stato terminato
     match->state = STATE_TERMINATED;
+
+    if(winner_index == -1) {
+        // Pareggio: entrambi ricevono TERMINATED (logica invariata)
+        Server_NoticeState *term0 = malloc(sizeof(Server_NoticeState));
+        term0->state = STATE_TERMINATED;
+        term0->match = match->id;
+
+        Packet *tp0 = malloc(sizeof(Packet));
+        tp0->id = SERVER_NOTICESTATE;
+        tp0->content = term0;
+
+        Server_NoticeState *term1 = malloc(sizeof(Server_NoticeState));
+        term1->state = STATE_TERMINATED;
+        term1->match = match->id;
+
+        Packet *tp1 = malloc(sizeof(Packet));
+        tp1->id = SERVER_NOTICESTATE;
+        tp1->content = term1;
+
+        if(p0_fd != -1) send_packet(p0_fd, tp0);
+        if(p1_fd != -1) send_packet(p1_fd, tp1);
+
+        free(tp0); free(term0);
+        free(tp1); free(term1);
+    } else {
+        // Vittoria: invia TERMINATED solo al perdente
+        int loser_index = (winner_index == 0) ? 1 : 0;
+        int loser_fd = (loser_index == 0) ? p0_fd : p1_fd;
+
+        Server_NoticeState *term_loser = malloc(sizeof(Server_NoticeState));
+        term_loser->state = STATE_TERMINATED;
+        term_loser->match = match->id;
+
+        Packet *tp_loser = malloc(sizeof(Packet));
+        tp_loser->id = SERVER_NOTICESTATE;
+        tp_loser->content = term_loser;
+
+        if(loser_fd != -1) send_packet(loser_fd, tp_loser);
+
+        free(tp_loser);
+        free(term_loser);
+    }
 
     // Broadcast a tutti gli altri client: la partita è terminata
     Server_BroadcastMatch *bc = malloc(sizeof(Server_BroadcastMatch));

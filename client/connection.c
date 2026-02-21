@@ -18,6 +18,7 @@ int pending_request_player = -1;
 int pending_request_match = -1;
 int show_menu_flag = 0;
 int in_waiting_room = 0;
+int i_won = 0;
 
 // ========== FUNZIONI DI UTILITÀ ==========
 
@@ -41,6 +42,7 @@ static void reset_match_state() {
     my_turn_flag = 0;
     am_i_player1 = -1;
     in_waiting_room = 0;
+    i_won = 0;
     memset(client_grid, 0, sizeof(client_grid));
 }
 
@@ -135,6 +137,8 @@ static void handle_broadcast_match(void *serialized) {
         if(current_match_id == bc->match) return;
         printf("%s Partita #%d è terminata\n", MSG_INFO, bc->match);
     } else {
+        // Ignora il broadcast della nostra stessa partita riaperta
+        if(bc->match == current_match_id && bc->player_id == player_id) return;
         printf("\n%s Nuova partita disponibile: #%d (creata da player #%d)\n",
                MSG_INFO, bc->match, bc->player_id);
     }
@@ -182,6 +186,7 @@ static void handle_win_state(int match_id) {
     printf("=========================\n");
     match_ended = 1;
     my_turn_flag = 0;
+    i_won = 1;
 }
 
 static void handle_lose_state(int match_id) {
@@ -191,6 +196,7 @@ static void handle_lose_state(int match_id) {
     printf("=========================\n");
     match_ended = 1;
     my_turn_flag = 0;
+    i_won = 0;
 }
 
 static void handle_draw_state(int match_id) {
@@ -203,6 +209,12 @@ static void handle_draw_state(int match_id) {
 }
 
 static void handle_terminated_state(int match_id) {
+    if(i_won == 1) {
+        // Il vincitore non riceve TERMINATED immediatamente: questo non dovrebbe
+        // arrivare in condizioni normali, ma se arriva ignoriamolo.
+        // (Il vincitore gestisce la fine partita tramite l'opzione 6 del menu)
+        return;
+    }
     if(match_ended != 1) {
         printf("%s Partita #%d terminata: l'avversario si è disconnesso\n", MSG_INFO, match_id);
     } else {
@@ -457,9 +469,21 @@ void play_again(int sockfd, int match_id, int choice) {
     free(play);
 
     if(choice == 1) {
-        printf("%s Richiesta 'Gioca Ancora' inviata. In attesa dell'altro giocatore...\n", MSG_INFO);
+        if(i_won == 1) {
+            // Vincitore vuole rigiocare: entra in waiting room come proprietario
+            printf("%s Partita rimessa in pausa, sei il proprietario. In attesa di un nuovo avversario...\n", MSG_INFO);
+            i_won = 0;
+            match_ended = 0;
+            am_i_player1 = 1;
+            in_waiting_room = 1;
+            memset(client_grid, 0, sizeof(client_grid));
+            // current_match_id rimane invariato: siamo ancora in quella stanza
+        } else {
+            printf("%s Richiesta 'Gioca Ancora' inviata. In attesa dell'altro giocatore...\n", MSG_INFO);
+        }
     } else {
         printf("%s Hai rifiutato di giocare ancora. Partita terminata.\n", MSG_INFO);
+        i_won = 0;
         reset_match_state();
     }
 }
