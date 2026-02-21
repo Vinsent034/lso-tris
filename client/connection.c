@@ -288,7 +288,7 @@ static void handle_draw_state(int match_id) {
 static void handle_terminated_state(int match_id) {
     (void)match_id;
     if(match_ended != 1) {
-        printf("%s La partita è terminata: l'avversario si è disconnesso\n", MSG_INFO);
+        printf("%s La partita è terminata\n", MSG_INFO);
     } else {
         printf("%s L'avversario ha abbandonato la partita.\n", MSG_INFO);
         printf("%s Ritorno al menu principale...\n\n", MSG_INFO);
