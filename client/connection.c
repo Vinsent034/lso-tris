@@ -17,6 +17,7 @@ int clear_stdin_flag = 0;
 int pending_request_player = -1;
 int pending_request_match = -1;
 int show_menu_flag = 0;
+int in_waiting_room = 0;
 
 // ========== FUNZIONI DI UTILITÀ ==========
 
@@ -39,6 +40,7 @@ static void reset_match_state() {
     match_ended = 0;
     my_turn_flag = 0;
     am_i_player1 = -1;
+    in_waiting_room = 0;
     memset(client_grid, 0, sizeof(client_grid));
 }
 
@@ -60,7 +62,7 @@ static void handle_success() {
 }
 
 static void handle_error() {
-    printf("%s Errore dal server\n", MSG_ERROR);
+    printf("\n%s Errore dal server\n", MSG_ERROR);
 
     // Se eravamo in attesa di rivincita e il server rifiuta,
     // l'avversario è già occupato: resetta lo stato
@@ -146,6 +148,12 @@ static void handle_turn_state(int state, int match_id) {
         memset(client_grid, 0, sizeof(client_grid));
         match_ended = 0;
     }
+    // Se eravamo in waiting room, è arrivato un nuovo avversario
+    if(in_waiting_room == 1) {
+        printf("\n%s Nuovo avversario trovato! Match #%d inizia!\n", MSG_INFO, match_id);
+        printf("=========================\n");
+        in_waiting_room = 0;
+    }
 
     printf("\n%s Partita #%d - %s\n", MSG_INFO, match_id,
            (state == STATE_TURN_PLAYER1) ? "Turno Player 1 (X)" : "Turno Player 2 (O)");
@@ -157,7 +165,7 @@ static void handle_turn_state(int state, int match_id) {
     if((state == STATE_TURN_PLAYER1 && am_i_player1 == 1) ||
        (state == STATE_TURN_PLAYER2 && am_i_player1 == 0)) {
         my_turn_flag = 1;
-        clear_stdin_flag = 1;
+        clear_stdin_flag = 0;
         printf("\n%s ================================\n", MSG_INFO);
         printf("%s È IL TUO TURNO!\n", MSG_INFO);
         printf("%s ================================\n", MSG_INFO);
@@ -202,14 +210,6 @@ static void handle_terminated_state(int match_id) {
         printf("%s Ritorno al menu principale...\n\n", MSG_INFO);
     }
     reset_match_state();
-
-    // Stampa il menu direttamente dal receiver thread
-    printf("\n=== MENU ===\n");
-    printf("\n1. Crea partita\n");
-    printf("2. Join partita\n");
-    printf("4. Visualizza griglia\n");
-    printf("9. Esci\n");
-    printf("> Scegli opzione: ");
 }
 
 static void handle_inprogress_state(int match_id) {
@@ -217,6 +217,18 @@ static void handle_inprogress_state(int match_id) {
     current_match_id = match_id;
     match_ended = 0;
     memset(client_grid, 0, sizeof(client_grid));
+}
+
+static void handle_waiting_state(int match_id) {
+    printf("\n%s L'avversario ha abbandonato la rivincita.\n", MSG_INFO);
+    printf("%s Sei ancora nella partita #%d come Player 1 (X).\n", MSG_INFO, match_id);
+    printf("%s In attesa di un nuovo avversario...\n\n", MSG_INFO);
+    match_ended = 0;
+    my_turn_flag = 0;
+    am_i_player1 = 1;
+    in_waiting_room = 1;
+    memset(client_grid, 0, sizeof(client_grid));
+    // current_match_id rimane invariato: siamo ancora in quella stanza
 }
 
 static void handle_notice_state(void *serialized) {
@@ -250,6 +262,18 @@ static void handle_notice_state(void *serialized) {
 
         case STATE_INPROGRESS:
             handle_inprogress_state(state->match);
+            break;
+
+        case STATE_CREATED:
+            // Il richiedente accettato era già in partita: siamo ancora in attesa
+            printf("\n%s Il giocatore accettato era già occupato in un'altra partita.\n", MSG_INFO);
+            printf("%s In attesa di un nuovo avversario per la partita #%d...\n\n", MSG_INFO, state->match);
+            in_waiting_room = 1;
+            my_turn_flag = 0;
+            break;
+
+        case STATE_WAITING:
+            handle_waiting_state(state->match);
             break;
 
         default:

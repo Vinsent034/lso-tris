@@ -11,11 +11,14 @@ pthread_mutex_t clients_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t matches_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //invia un pachetto a tutti i client tranne quello ,  in maniere sicura col mutex
+// Non invia ai player busy (in partita attiva)
 void broadcast_packet(ClientNode *head, Packet *packet, int except) {
     pthread_mutex_lock(&clients_mutex);
     ClientNode *current = head;
     while(current != NULL) {
-        if(current->val->conn != except) {
+        if(current->val->conn != except &&
+           current->val->player != NULL &&
+           current->val->player->busy == 0) {
             send_packet(current->val->conn, packet);
         }
         current = current->next;

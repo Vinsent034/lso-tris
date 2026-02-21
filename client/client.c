@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
 #include "../common/models.h"
 #include "../common/protocol.h"
 #include "connection.h"
@@ -17,6 +18,8 @@
 #define DEFAULT_IP      "127.0.0.1"
 #define DEFAULT_PORT    5555
 #define BUFFER_SIZE     1024
+
+static void show_menu();
 
 static volatile int g_sockfd = -1;
 
@@ -200,12 +203,6 @@ static void leave_match(int sockfd) {
 }
 
 static void handle_turn_input(int sockfd) {
-    if(clear_stdin_flag == 1) {
-        int c;
-        while ((c = getchar()) != '\n' && c != EOF);
-        clear_stdin_flag = 0;
-    }
-
     int x = read_coordinate("\nInserisci prima coordinata (riga 0-2, oppure 'N' per uscire): ");
     if(x == -1) { leave_match(sockfd); return; }
     if(x == -2) return;
@@ -217,9 +214,21 @@ static void handle_turn_input(int sockfd) {
         return;
     }
 
+    // Controlla se la partita è terminata mentre aspettavamo la prima coordinata
+    if(current_match_id == -1 || my_turn_flag == 0) {
+        show_menu();
+        return;
+    }
+
     int y = read_coordinate("Inserisci seconda coordinata (colonna 0-2, oppure 'N' per uscire): ");
     if(y == -1) { leave_match(sockfd); return; }
     if(y == -2) return;
+
+    // Controlla di nuovo prima di inviare la mossa
+    if(current_match_id == -1 || my_turn_flag == 0) {
+        show_menu();
+        return;
+    }
 
     make_move(sockfd, current_match_id, x, y);
     my_turn_flag = 0;
@@ -318,9 +327,12 @@ static void handle_menu_input(int sockfd) {
         exit(0);
     }
 
+    // Il fgets ha già consumato il newline, quindi non serve flush di stdin
+    clear_stdin_flag = 0;
+
     // Dopo aver letto l'input, ricontrolla se siamo entrati in una partita
     // (il receiver thread potrebbe aver cambiato lo stato mentre eravamo su fgets)
-    if(my_turn_flag == 1 || (current_match_id != -1 && match_ended == 0))
+    if(my_turn_flag == 1 || (current_match_id != -1 && match_ended == 0 && in_waiting_room == 0))
         return;
 
     char *endptr;
@@ -359,22 +371,42 @@ static void main_loop(int sockfd) {
             continue;
         }
 
-        // In partita attiva ma non è il nostro turno: leggi input
-        if(current_match_id != -1 && match_ended == 0 && my_turn_flag == 0) {
+        // In partita attiva ma non è il nostro turno: polling con select
+        // così se arriva il turno non consumiamo input di stdin
+        if(current_match_id != -1 && match_ended == 0 && my_turn_flag == 0 && in_waiting_room == 0) {
+            fd_set rfds;
+            struct timeval tv;
+            FD_ZERO(&rfds);
+            FD_SET(STDIN_FILENO, &rfds);
+            tv.tv_sec = 0;
+            tv.tv_usec = 100000; // 100ms
+
+            int ret = select(STDIN_FILENO + 1, &rfds, NULL, NULL, &tv);
+
+            // Se nel frattempo è arrivato il nostro turno, non leggere stdin
+            if(my_turn_flag == 1)
+                continue;
+
+            // Se la partita è terminata (es. disconnessione avversario), torna al menu
+            if(current_match_id == -1 || match_ended == 1)
+                continue;
+
+            // Nessun input disponibile: ricontrolla le flag
+            if(ret <= 0)
+                continue;
+
+            // C'è input disponibile su stdin: leggilo
             char input[100];
-            printf("> In attesa del turno avversario (digita 'N' per uscire): ");
             if(fgets(input, sizeof(input), stdin) == NULL)
                 continue;
 
-            // Se nel frattempo è diventato il nostro turno, il fgets ha già
-            // consumato l'input sporco, quindi resetta clear_stdin_flag
+            // Ricontrolla dopo fgets
             if(my_turn_flag == 1) {
-                clear_stdin_flag = 0;
+                // L'input letto era inutile, scartalo
                 continue;
             }
 
-            // Se la partita è terminata nel frattempo (disconnessione avversario)
-            if(current_match_id == -1)
+            if(current_match_id == -1 || match_ended == 1)
                 continue;
 
             input[strcspn(input, "\n")] = '\0';

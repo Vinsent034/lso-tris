@@ -23,6 +23,7 @@ extern int am_i_player1;  // 1 se sono Player1 (X), 0 se sono Player2 (O)
 extern int my_turn_flag;  // 1 quando è il mio turno e devo giocare
 extern int clear_stdin_flag;  // 1 se dobbiamo pulire stdin prima di leggere
 extern int show_menu_flag;    // 1 quando il menu deve essere ristampato
+extern int in_waiting_room;   // 1 quando siamo in stanza ma senza avversario (dopo rivincita annullata)
 
 // Pending match request
 extern int pending_request_player;
