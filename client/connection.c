@@ -71,7 +71,8 @@ int pending_request_player = -1;
 int pending_request_match = -1;
 int show_menu_flag = 0;
 int in_waiting_room = 0;
-int i_won = 0; // 1 se abbiamo vinto l'ultima partita (per gestire opzione 6 del vincitore)
+
+static int cached_sockfd = -1; // fd salvato per inviare pacchetti dagli handler
 
 // ========== FUNZIONI DI UTILITÀ ==========
 
@@ -95,7 +96,6 @@ static void reset_match_state() {
     my_turn_flag = 0;
     am_i_player1 = -1;
     in_waiting_room = 0;
-    i_won = 0;
     memset(client_grid, 0, sizeof(client_grid));
     available_matches = NULL;
 }
@@ -239,11 +239,32 @@ static void handle_turn_state(int state, int match_id) {
 static void handle_win_state(int match_id) {
     printf("\n%s Partita #%d - Risultato finale:\n", MSG_INFO, match_id);
     display_grid();
-    printf("\n%s HAI VINTO! Usa l'opzione 6 per riaprire la partita o 1 per crearne una nuova.\n", MSG_INFO);
+    printf("\n%s HAI VINTO! Sei il nuovo proprietario della partita. In attesa di un nuovo avversario...\n", MSG_INFO);
     printf("=========================\n");
-    match_ended = 1;
     my_turn_flag = 0;
-    i_won = 1;
+
+    // Invia automaticamente CLIENT_PLAYAGAIN con choice=1: diventa il proprietario
+    if(cached_sockfd != -1) {
+        Client_PlayAgain *play = malloc(sizeof(Client_PlayAgain));
+        play->choice = 1;
+        play->match = match_id;
+
+        Packet *pkt = malloc(sizeof(Packet));
+        pkt->id = CLIENT_PLAYAGAIN;
+        pkt->content = play;
+
+        send_packet(cached_sockfd, pkt);
+
+        free(pkt);
+        free(play);
+    }
+
+    // Entra in waiting room come proprietario
+    match_ended = 0;
+    am_i_player1 = 1;
+    in_waiting_room = 1;
+    memset(client_grid, 0, sizeof(client_grid));
+    // current_match_id rimane invariato
 }
 
 static void handle_lose_state(int match_id) {
@@ -251,8 +272,8 @@ static void handle_lose_state(int match_id) {
     display_grid();
     printf("\n%s Hai perso.\n", MSG_ERROR);
     printf("=========================\n");
-    match_ended = 1;
     my_turn_flag = 0;
+    // Il perdente riceverà STATE_TERMINATED a breve: reset_match_state lì
 }
 
 static void handle_draw_state(int match_id) {
@@ -363,7 +384,7 @@ static void handle_notice_move(void *serialized) {
 // ========== HANDLER PRINCIPALE ==========
 
 void handle_packet(int sockfd, Packet *packet) {
-    (void)sockfd; // Non usato, evita warning
+    cached_sockfd = sockfd;
 
     void *serialized = serialize_packet(packet);
 
@@ -519,22 +540,10 @@ void play_again(int sockfd, int match_id, int choice) {
     free(play);
 
     if(choice == 1) {
-        if(i_won == 1) {
-            // Vincitore vuole riaprire la partita: entra in waiting room come proprietario
-            printf("%s Partita riaperta. Sei il proprietario. In attesa di un nuovo avversario...\n", MSG_INFO);
-            i_won = 0;
-            match_ended = 0;
-            am_i_player1 = 1;
-            in_waiting_room = 1;
-            memset(client_grid, 0, sizeof(client_grid));
-            // current_match_id rimane invariato
-        } else {
-            // Caso pareggio: aspetta che anche l'altro dica sì
-            printf("%s Richiesta 'Gioca Ancora' inviata. In attesa dell'altro giocatore...\n", MSG_INFO);
-        }
+        // Caso pareggio: aspetta che anche l'altro dica sì
+        printf("%s Richiesta 'Gioca Ancora' inviata. In attesa dell'altro giocatore...\n", MSG_INFO);
     } else {
         printf("%s Hai rifiutato di giocare ancora. Partita terminata.\n", MSG_INFO);
-        i_won = 0;
         reset_match_state();
     }
 }
