@@ -266,6 +266,10 @@ static void handle_menu_grid() {
     }
 }
 
+static void handle_menu_list() {
+    print_available_matches();
+}
+
 static void handle_menu_respond(int sockfd) {
     if(pending_request_match == -1) {
         printf("%s Nessuna richiesta pendente!\n", MSG_ERROR);
@@ -305,6 +309,7 @@ static void handle_menu_play_again(int sockfd) {
 static void show_menu() {
     printf("\n1. Crea partita\n");
     printf("2. Join partita\n");
+    printf("3. Lista partite disponibili\n");
     printf("4. Visualizza griglia\n");
     if(pending_request_match != -1) {
         printf("5. Rispondi a richiesta (player #%d vuole giocare) [PENDENTE]\n", pending_request_player);
@@ -347,6 +352,7 @@ static void handle_menu_input(int sockfd) {
     switch(scelta) {
         case 1: handle_menu_create(sockfd);     break;
         case 2: handle_menu_join(sockfd);        break;
+        case 3: handle_menu_list();              break;
         case 4: handle_menu_grid();              break;
         case 5: handle_menu_respond(sockfd);     break;
         case 6: handle_menu_play_again(sockfd);  break;
