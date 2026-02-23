@@ -1,0 +1,39 @@
+# Eseguibili
+run_server
+run_client
+
+# File oggetto
+*.o
+*.out
+*.exe
+
+# File di debug
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Core dumps
+core
+core.*
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Temporanei
+*.log
+*.tmp
+
+# Docker
+Dockerfile.client
+Dockerfile.server
+docker-client.sh
+docker-entrypoint.sh
+docker-start.sh
+.dockerignore
+DOCKER.md

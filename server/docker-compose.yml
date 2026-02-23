@@ -1,0 +1,12 @@
+services:
+  tris_server:
+    build:
+      context: ..
+      dockerfile: ./server/Dockerfile
+    container_name: los-tris-server
+    ports: # Porta da aprire
+      - "5555:5555"
+    volumes: # Monto file e cartelle del progetto
+      - ../common:/tris/common
+      - ./:/tris/server
+    #network_mode: "host" # Permetto connessioni esterne
